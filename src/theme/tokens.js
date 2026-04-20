@@ -1,0 +1,66 @@
+export const appTheme = {
+  color: {
+    bgCanvas: '#0B1424',
+    bgSurface: '#122039',
+    bgElevated: '#1A2B4A',
+    brandGold: '#F2C94C',
+    brandBlue: '#2F80ED',
+    textPrimary: '#F8FAFC',
+    textSecondary: '#B8C2D1',
+    borderDefault: '#2A3B5C',
+    status: {
+      EMPTY: '#22C55E',
+      NORMAL: '#84CC16',
+      CROWDED: '#F59E0B',
+      ALMOST_FULL: '#EF4444',
+      FULL: '#ff0000',
+      UNKNOWN: '#94A3B8',
+    },
+    zone: {
+      A: '#E74C3C',
+      B: '#3498DB',
+      C: '#2ECC71',
+      D: '#F39C12',
+      E: '#9B59B6',
+      F: '#1ABC9C',
+      G: '#E67E22',
+      H: '#2980B9',
+      I: '#C0392B',
+      J: '#27AE60',
+      fallback: '#95A5A6',
+    },
+  },
+  spacing: {
+    xs: 8,
+    sm: 12,
+    md: 16,
+    lg: 20,
+    xl: 24,
+  },
+  radius: {
+    sm: 8,
+    md: 12,
+    lg: 16,
+    xl: 20,
+  },
+  typography: {
+    familyHeading: 'SpaceGrotesk_700Bold',
+    familyBody: 'Manrope_400Regular',
+    size: {
+      xs: 12,
+      sm: 14,
+      md: 16,
+      lg: 20,
+      xl: 24,
+      xxl: 30,
+    },
+  },
+};
+
+export const componentMetrics = {
+  horizontalPadding: 20,
+  inputHeight: 52,
+  primaryButtonHeight: 52,
+  touchTargetMin: 44,
+  bottomSafePadding: 12,
+};
