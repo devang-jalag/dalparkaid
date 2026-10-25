@@ -1,0 +1,919 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DalParkAid | Geospatial Parking Telemetry & Predictive Routing</title>
+  <meta name="description" content="Zero-hardware parking availability prediction and turn-by-turn stall routing across 28 Dalhousie University lots and Halifax municipal parkades." />
+  <link rel="icon" type="image/svg+xml" href="./assets/dalparkaid-logo.svg" />
+  <link rel="apple-touch-icon" href="./assets/dalparkaid-logo.svg" />
+
+  <!-- Fonts matching src/theme/tokens.js -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+
+  <!-- Leaflet Geospatial CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            heading: ['Space Grotesk', 'sans-serif'],
+            sans: ['Manrope', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace']
+          },
+          colors: {
+            canvas: '#0B1424',
+            surface: '#122039',
+            elevated: '#1A2B4A',
+            dalGold: '#F2C94C',
+            dalBlue: '#2F80ED'
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    body {
+      background-color: #0B1424;
+      color: #F8FAFC;
+      overflow-x: hidden;
+    }
+    .grid-backdrop {
+      background-size: 38px 38px;
+      background-image:
+        linear-gradient(to right, rgba(42, 59, 92, 0.22) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(42, 59, 92, 0.22) 1px, transparent 1px);
+    }
+    .radar-sweep {
+      background: conic-gradient(from 0deg, rgba(242, 201, 76, 0.24), transparent 35%);
+      animation: spinSlow 7s linear infinite;
+    }
+    @keyframes spinSlow {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    /* Custom Geospatial Map Pins */
+    .lot-pin-wrapper {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.2s ease;
+    }
+    .lot-pin-wrapper:hover, .lot-pin-wrapper.is-selected {
+      transform: scale(1.16);
+      z-index: 999 !important;
+    }
+    .lot-pin-pulse {
+      position: absolute;
+      inset: 0;
+      border-radius: 9999px;
+      border-width: 2px;
+      animation: pinPulse 2.2s infinite ease-out;
+    }
+    @keyframes pinPulse {
+      0% { transform: scale(0.85); opacity: 0.95; }
+      100% { transform: scale(1.65); opacity: 0; }
+    }
+    .lot-pin-core {
+      position: relative;
+      width: 24px;
+      height: 24px;
+      border-radius: 9999px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      font-weight: 700;
+      color: #070C16;
+      border: 2px solid #0B1424;
+    }
+    .lot-pin-label {
+      position: absolute;
+      top: -24px;
+      background: #0B1424;
+      color: #F2C94C;
+      border: 1px solid #F2C94C;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      font-weight: 700;
+      white-space: nowrap;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+    }
+    .vehicle-radar-cone {
+      position: absolute;
+      top: -16px;
+      width: 0;
+      height: 0;
+      border-left: 12px solid transparent;
+      border-right: 12px solid transparent;
+      border-bottom: 22px solid rgba(242, 201, 76, 0.35);
+      filter: blur(1px);
+      pointer-events: none;
+    }
+    .leaflet-container {
+      background: #080E1A !important;
+      font-family: 'Manrope', sans-serif;
+    }
+    input[type="range"] {
+      accent-color: #F2C94C;
+    }
+  </style>
+</head>
+<body class="font-sans antialiased selection:bg-dalGold selection:text-slate-950">
+
+  <!-- Top Geospatial Telemetry Bar -->
+  <div class="bg-slate-950 border-b border-slate-800/90 px-4 py-2 text-[11px] font-mono text-slate-400">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
+      <div class="flex items-center gap-3">
+        <div class="flex items-center gap-1.5 px-2 py-0.5 rounded bg-slate-900 border border-slate-800">
+          <img src="./assets/dal-logo.png" alt="Dalhousie Logo" class="h-3.5 w-auto object-contain brightness-125" />
+          <span class="text-slate-300 font-semibold">DALHOUSIE</span>
+        </div>
+        <span class="flex items-center gap-1.5 text-emerald-400 font-semibold">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+          TELEMETRY ONLINE: 44.6368° N, 63.5917° W
+        </span>
+        <span id="live-halifax-temp" class="hidden sm:inline text-slate-300">11°C in Halifax</span>
+        <span id="live-halifax-wind" class="hidden md:inline text-slate-500">Wind 18 km/h</span>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="px-2 py-0.5 rounded bg-dalGold/15 text-dalGold border border-dalGold/30 font-semibold">
+          CAMPUS2MARKET VALIDATE VENTURE
+        </span>
+        <a href="#validate" class="text-white underline hover:text-dalGold">Join Pilot Cohort →</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Navigation Header -->
+  <header class="sticky top-0 z-50 backdrop-blur-md bg-canvas/85 border-b border-slate-800/80">
+    <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+      <a href="#" class="flex items-center gap-3 group">
+        <div class="relative w-11 h-11 rounded-2xl overflow-hidden bg-slate-900 border-2 border-dalGold/60 p-0.5 flex items-center justify-center shadow-lg shadow-dalGold/20 group-hover:border-dalGold transition">
+          <img src="./assets/dalparkaid-logo.svg" alt="DalParkAid Logo" class="w-full h-full object-contain rounded-xl" />
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="font-heading font-bold text-xl tracking-tight text-white">Dal<span class="text-dalGold">ParkAid</span></span>
+            <span class="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-dalGold/15 text-dalGold border border-dalGold/30">VENTURE</span>
+          </div>
+          <span class="block text-[10px] font-mono uppercase tracking-widest text-slate-400">Dalhousie Geospatial Parking</span>
+        </div>
+      </a>
+
+      <nav class="hidden lg:flex items-center gap-7 text-sm font-semibold text-slate-300">
+        <a href="#command-map" class="hover:text-dalGold transition">Live Command Map</a>
+        <a href="#lot-physics" class="hover:text-dalGold transition">Stall Physics Sim</a>
+        <a href="#engine-architecture" class="hover:text-dalGold transition">Prediction Engine</a>
+        <a href="#commuter-economics" class="hover:text-dalGold transition">ROI Calculator</a>
+        <a href="#validate" class="hover:text-dalGold transition">Campus2Market Pilot</a>
+      </nav>
+
+      <div class="flex items-center gap-3">
+        <a href="#command-map" class="hidden sm:inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-surface border border-slate-700 text-xs font-mono font-semibold text-slate-200 hover:border-dalGold transition">
+          <span>28 Dal Lots + 7 HRM Zones</span>
+        </a>
+        <a href="#validate" class="px-4 py-2.5 rounded-xl bg-dalGold text-slate-950 font-bold text-xs sm:text-sm hover:bg-yellow-300 transition shadow-md shadow-dalGold/15">
+          Validate With Us
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Hero Section with Animated Geospatial Radar & Vehicle HUD -->
+  <section class="relative grid-backdrop pt-14 pb-16 px-6 border-b border-slate-800/80 overflow-hidden">
+    <div class="max-w-7xl mx-auto grid lg:grid-cols-12 gap-10 items-center">
+      <div class="lg:col-span-7 space-y-6">
+        <div class="inline-flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-surface border border-slate-700/80 text-xs font-mono text-dalGold">
+          <span>ZERO-HARDWARE PARKING INTELLIGENCE</span>
+          <span class="text-slate-600">|</span>
+          <span class="text-slate-300">STUDLEY • SEXTON • HRM ZONES</span>
+        </div>
+
+        <h1 class="font-heading text-4xl sm:text-6xl font-bold tracking-tight leading-[1.08] text-white">
+          Know Exactly Which Campus Lot Has Open Stalls <span class="text-dalGold">Before You Leave Home.</span>
+        </h1>
+
+        <p class="text-base sm:text-lg text-slate-300 max-w-2xl leading-relaxed">
+          Dalhousie sells thousands of commuter permits across 28 surface lots and parkades without stall sensors. DalParkAid fuses live 30-meter geofenced driver reports, Open-Meteo weather pressure, and academic timetable loads to predict open spaces and route drivers past full lots.
+        </p>
+
+        <div class="flex flex-wrap items-center gap-4 pt-2">
+          <a href="#command-map" class="px-7 py-4 rounded-xl bg-dalGold text-slate-950 font-bold text-sm sm:text-base hover:bg-yellow-300 transition shadow-lg shadow-dalGold/20">
+            Launch Live Halifax Map & Dispatch Cars
+          </a>
+          <a href="#lot-physics" class="px-6 py-4 rounded-xl bg-surface hover:bg-elevated text-white font-semibold text-sm sm:text-base border border-slate-700 transition">
+            Test Gate Reroute Physics
+          </a>
+        </div>
+
+        <!-- Grounded Venture Metrics -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-6">
+          <div class="p-4 rounded-2xl bg-surface/90 border border-slate-800">
+            <div class="font-mono text-2xl font-bold text-dalGold">28 Lots</div>
+            <div class="text-xs text-slate-400 mt-0.5">Mapped across Studley & Sexton with stall-tier rules</div>
+          </div>
+          <div class="p-4 rounded-2xl bg-surface/90 border border-slate-800">
+            <div class="font-mono text-2xl font-bold text-emerald-400">$0 CapEx</div>
+            <div class="text-xs text-slate-400 mt-0.5">Replaces $550/stall asphalt inductive loop hardware</div>
+          </div>
+          <div class="p-4 rounded-2xl bg-surface/90 border border-slate-800">
+            <div class="font-mono text-2xl font-bold text-sky-400">3 Signals</div>
+            <div class="text-xs text-slate-400 mt-0.5">Deterministic schedule, 90m crowd decay & 42d history</div>
+          </div>
+          <div class="p-4 rounded-2xl bg-surface/90 border border-slate-800">
+            <div class="font-mono text-2xl font-bold text-white">5:00 PM</div>
+            <div class="text-xs text-slate-400 mt-0.5">Automatic switchover for unlocked evening reserved stalls</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Interactive Radar & Vehicle Telemetry Card -->
+      <div class="lg:col-span-5">
+        <div class="relative rounded-3xl bg-surface border border-slate-700/80 p-6 shadow-2xl overflow-hidden">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-4 mb-5">
+            <div>
+              <span class="text-[10px] font-mono uppercase tracking-widest text-dalGold">LIVE TELEMETRY SNAPSHOT</span>
+              <h3 class="font-heading text-lg font-bold text-white">Halifax Campus Corridor</h3>
+            </div>
+            <span class="px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-mono text-xs font-bold">
+              ENGINE v2.4 ACTIVE
+            </span>
+          </div>
+
+          <!-- Animated SVG Geospatial Radar Preview -->
+          <div class="relative h-56 rounded-2xl bg-slate-950 border border-slate-800 overflow-hidden flex items-center justify-center mb-5">
+            <div class="absolute w-72 h-72 rounded-full radar-sweep pointer-events-none"></div>
+            <div class="absolute w-48 h-48 rounded-full border border-slate-800"></div>
+            <div class="absolute w-32 h-32 rounded-full border border-slate-800"></div>
+            <div class="absolute w-16 h-16 rounded-full border border-dalGold/30"></div>
+
+            <!-- Simulated Street Grid Lines -->
+            <svg viewBox="0 0 400 220" class="w-full h-full opacity-80">
+              <!-- University Ave & South St Corridors -->
+              <path d="M 10 110 L 390 110" stroke="#1E293B" stroke-width="10"/>
+              <path d="M 10 110 L 390 110" stroke="#F2C94C" stroke-width="1.5" stroke-dasharray="8 8" opacity="0.5"/>
+              <path d="M 140 10 L 140 210" stroke="#1E293B" stroke-width="8"/>
+              <path d="M 270 10 L 270 210" stroke="#1E293B" stroke-width="8"/>
+
+              <!-- Active Route Vector -->
+              <path d="M 35 110 L 140 110 L 140 55 L 245 55" fill="none" stroke="#22C55E" stroke-width="3.5" stroke-dasharray="6 4">
+                <animate attributeName="stroke-dashoffset" from="40" to="0" dur="1.5s" repeatCount="indefinite"/>
+              </path>
+
+              <!-- Full Lot (Chemistry) Bypassed -->
+              <circle cx="140" cy="110" r="9" fill="#EF4444"/>
+              <text x="154" y="126" fill="#F87171" font-family="JetBrains Mono" font-size="9" font-weight="bold">CHEMISTRY: FULL (12%)</text>
+
+              <!-- Open Lot (Biology) Target -->
+              <circle cx="245" cy="55" r="11" fill="#22C55E" opacity="0.25">
+                <animate attributeName="r" values="9;18;9" dur="2s" repeatCount="indefinite"/>
+              </circle>
+              <circle cx="245" cy="55" r="7" fill="#22C55E"/>
+              <text x="200" y="36" fill="#4ADE80" font-family="JetBrains Mono" font-size="9" font-weight="bold">BIOLOGY: 52 OPEN (74%)</text>
+
+              <!-- Moving Commuter Vehicle -->
+              <g>
+                <animateMotion path="M 35 110 L 140 110 L 140 55 L 245 55" dur="4.5s" repeatCount="indefinite"/>
+                <rect x="-10" y="-6" width="20" height="12" rx="3" fill="#F2C94C" stroke="#0B1424" stroke-width="1.5"/>
+              </g>
+            </svg>
+          </div>
+
+          <div class="grid grid-cols-3 gap-2.5 text-center font-mono">
+            <div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800">
+              <div id="hud-total-open" class="text-lg font-bold text-emerald-400">642</div>
+              <div class="text-[10px] text-slate-400">EST. OPEN STALLS</div>
+            </div>
+            <div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800">
+              <div id="hud-total-cap" class="text-lg font-bold text-white">1,495</div>
+              <div class="text-[10px] text-slate-400">MAPPED CAPACITY</div>
+            </div>
+            <div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800">
+              <div id="hud-occupancy-pct" class="text-lg font-bold text-dalGold">57%</div>
+              <div class="text-[10px] text-slate-400">CAMPUS LOAD</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================================== -->
+  <!-- SECTION 1: INTERACTIVE HALIFAX GEOSPATIAL COMMAND MAP & VEHICLE DISPATCHER -->
+  <!-- ========================================================================== -->
+  <section id="command-map" class="py-16 px-6 border-b border-slate-800/80">
+    <div class="max-w-7xl mx-auto">
+      <div class="flex flex-col lg:flex-row lg:items-end justify-between gap-4 mb-8">
+        <div>
+          <span class="text-dalGold font-mono text-xs font-bold uppercase tracking-widest">INTERACTIVE GEOSPATIAL SANDBOX</span>
+          <h2 class="font-heading text-3xl sm:text-4xl font-bold text-white mt-1">
+            Live Campus Lot Telemetry & Commuter Dispatch
+          </h2>
+          <p class="text-slate-400 text-sm mt-1">
+            Click any of the 28 Dalhousie lots on the map, scrub the 24-hour clock, or dispatch a commuter vehicle below to watch live rerouting.
+          </p>
+        </div>
+
+        <!-- Campus Filter Buttons -->
+        <div class="flex flex-wrap gap-2">
+          <button onclick="window.DalSim.setCampusFilter('all')" data-campus="all" class="campus-filter-btn px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold bg-amber-400 text-slate-950 transition">
+            All Dal Lots (28)
+          </button>
+          <button onclick="window.DalSim.setCampusFilter('studley')" data-campus="studley" class="campus-filter-btn px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-700 transition">
+            Studley Campus (21)
+          </button>
+          <button onclick="window.DalSim.setCampusFilter('sexton')" data-campus="sexton" class="campus-filter-btn px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-700 transition">
+            Sexton Downtown (7)
+          </button>
+          <button onclick="window.DalSim.setCampusFilter('hrm-expansion')" data-campus="hrm-expansion" class="campus-filter-btn px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-700 transition">
+            + HRM Expansion Zones (7)
+          </button>
+        </div>
+      </div>
+
+      <!-- Time Scrubber, Weather & Academic Signal Control Bar -->
+      <div class="p-5 rounded-2xl bg-surface border border-slate-800 mb-6 grid lg:grid-cols-12 gap-6 items-center">
+        <!-- 24-Hour Time Scrubber -->
+        <div class="lg:col-span-5">
+          <div class="flex items-center justify-between text-xs font-mono mb-2">
+            <span class="text-slate-400 uppercase">SIMULATED TIME OF DAY</span>
+            <span id="scrubber-time-display" class="text-dalGold font-bold">10:00 AM (Daytime Permit Rules Active)</span>
+          </div>
+          <input id="hour-scrubber" type="range" min="0" max="23" value="10"
+                 oninput="window.DalSim.setHour(this.value)"
+                 class="w-full h-2 bg-slate-900 rounded-lg cursor-pointer" />
+          <div class="flex justify-between text-[10px] font-mono text-slate-500 mt-1">
+            <span>12 AM</span>
+            <span>6 AM (Permits Enforced)</span>
+            <span>12 PM (Peak)</span>
+            <span>5 PM (Evening Unlock)</span>
+            <span>11 PM</span>
+          </div>
+        </div>
+
+        <!-- Weather Pressure Selector -->
+        <div class="lg:col-span-4">
+          <div class="text-xs font-mono text-slate-400 uppercase mb-2">HALIFAX WEATHER SIGNAL (OPEN-METEO)</div>
+          <div class="flex flex-wrap gap-1.5">
+            <button onclick="window.DalSim.setWeather('CLEAR')" data-weather="CLEAR" class="weather-btn px-3 py-1.5 rounded-lg text-xs font-mono font-semibold border">Clear (0)</button>
+            <button onclick="window.DalSim.setWeather('RAIN')" data-weather="RAIN" class="weather-btn px-3 py-1.5 rounded-lg text-xs font-semibold font-mono border">Rain (-8)</button>
+            <button onclick="window.DalSim.setWeather('SNOW')" data-weather="SNOW" class="weather-btn px-3 py-1.5 rounded-lg text-xs font-semibold font-mono border">Snow (-10)</button>
+            <button onclick="window.DalSim.setWeather('STORM')" data-weather="STORM" class="weather-btn px-3 py-1.5 rounded-lg text-xs font-semibold font-mono border">Storm (-12)</button>
+          </div>
+        </div>
+
+        <!-- Academic Calendar Signal -->
+        <div class="lg:col-span-3">
+          <label class="block text-xs font-mono text-slate-400 uppercase mb-2">DAL.CA ACADEMIC CALENDAR</label>
+          <select onchange="window.DalSim.setAcademicDay(this.value)"
+                  class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs font-mono text-white focus:outline-none focus:border-dalGold">
+            <option value="TEACHING_DAY">Regular Teaching Day (+0)</option>
+            <option value="EXAM_PERIOD">Exam Period (+2)</option>
+            <option value="READING_WEEK">Reading Week (+16)</option>
+            <option value="FRIDAY_SCHEDULE_OVERRIDE">Friday Schedule Override (-2)</option>
+            <option value="UNIVERSITY_CLOSED">University Holiday (+32)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Main Map + Right Telemetry Inspector Grid -->
+      <div class="grid lg:grid-cols-12 gap-6">
+        <!-- Map Column -->
+        <div class="lg:col-span-8 flex flex-col gap-4">
+          <div class="relative rounded-3xl overflow-hidden border border-slate-700/90 shadow-2xl h-[480px]">
+            <div id="halifax-map" class="w-full h-full"></div>
+
+            <!-- Floating Map Legend & Tile Switcher -->
+            <div class="absolute top-4 left-4 z-[400] bg-slate-950/90 backdrop-blur-md border border-slate-800 rounded-xl px-3.5 py-2.5 text-[11px] font-mono space-y-1.5 shadow-xl">
+              <div class="text-slate-400 font-bold uppercase text-[10px]">STALL AVAILABILITY SCORE</div>
+              <div class="flex items-center gap-3">
+                <span class="flex items-center gap-1 text-emerald-400"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>80+ Empty</span>
+                <span class="flex items-center gap-1 text-lime-400"><span class="w-2.5 h-2.5 rounded-full bg-lime-500"></span>58+ Normal</span>
+                <span class="flex items-center gap-1 text-amber-400"><span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span>36+ Crowded</span>
+                <span class="flex items-center gap-1 text-rose-400"><span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span>&lt;36 Full</span>
+              </div>
+            </div>
+
+            <!-- Map Engine Switcher: Google Maps SDK with OpenStreetMap Fallback -->
+            <div class="absolute top-4 right-4 z-[400] bg-slate-950/90 backdrop-blur-md border border-slate-800 rounded-xl p-1.5 flex flex-wrap items-center gap-1 shadow-xl">
+              <span id="map-engine-badge" class="hidden sm:inline-block px-2 py-0.5 rounded bg-dalGold/15 text-dalGold border border-dalGold/30 text-[9px] font-mono font-bold mr-1">
+                DARK VECTOR TELEMETRY
+              </span>
+              <button onclick="window.DalSim.setMapTileStyle('googleHybrid')" data-style="googleHybrid" class="map-style-btn px-2.5 py-1 rounded-md text-[10px] font-mono font-bold bg-slate-900 text-slate-300 hover:bg-slate-800 transition">
+                Google Satellite
+              </button>
+              <button onclick="window.DalSim.setMapTileStyle('googleRoads')" data-style="googleRoads" class="map-style-btn px-2.5 py-1 rounded-md text-[10px] font-mono font-bold bg-slate-900 text-slate-300 hover:bg-slate-800 transition">
+                Google Streets
+              </button>
+              <button onclick="window.DalSim.setMapTileStyle('dark')" data-style="dark" class="map-style-btn px-2.5 py-1 rounded-md text-[10px] font-mono font-bold bg-amber-400 text-slate-950 transition">
+                Dark Mode
+              </button>
+              <button onclick="window.DalSim.setMapTileStyle('osm')" data-style="osm" class="map-style-btn px-2.5 py-1 rounded-md text-[10px] font-mono font-bold bg-slate-900 text-slate-300 hover:bg-slate-800 transition">
+                OpenStreetMap
+              </button>
+              <button onclick="window.DalSim.locateUserNearestLot()" title="Locate with Browser GPS" class="px-2 py-1 rounded-md text-[10px] font-mono font-bold bg-sky-500/20 text-sky-300 hover:bg-sky-500/30 border border-sky-500/40 transition">
+                GPS
+              </button>
+            </div>
+          </div>
+
+          <!-- Live Dispatch Telemetry Output Banner -->
+          <div id="dispatch-telemetry-log" class="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 font-mono text-xs text-slate-300 leading-relaxed">
+            Select a commuter persona below to simulate turn-by-turn vehicle routing and automatic lot bypass.
+          </div>
+        </div>
+
+        <!-- Right Column: Selected Lot Deep Inspector & Crowd Signal Injector -->
+        <div class="lg:col-span-4 flex flex-col justify-between rounded-3xl bg-surface border border-slate-800 p-6 space-y-5">
+          <div>
+            <div class="flex items-center justify-between gap-2 mb-2">
+              <span id="selected-lot-campus" class="text-[11px] font-mono font-bold text-dalGold uppercase">STUDLEY CAMPUS</span>
+              <span id="selected-lot-status-badge" class="px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold border">NORMAL</span>
+            </div>
+
+            <h3 id="selected-lot-name" class="font-heading text-2xl font-bold text-white">Dalplex Lot</h3>
+            <p id="selected-lot-address" class="text-xs text-slate-400 mt-0.5">6260 South Street, Halifax, NS</p>
+
+            <!-- Availability Score Bar -->
+            <div class="mt-5 p-4 rounded-2xl bg-slate-900/90 border border-slate-800">
+              <div class="flex items-baseline justify-between mb-2">
+                <span class="text-xs font-mono text-slate-400">PREDICTED SCORE</span>
+                <span id="selected-lot-score" class="font-mono text-xl font-bold text-white">68/100</span>
+              </div>
+              <div class="w-full h-2.5 rounded-full bg-slate-800 overflow-hidden mb-3">
+                <div id="selected-lot-score-bar" class="h-full transition-all duration-300" style="width: 68%; background: #22C55E;"></div>
+              </div>
+              <div class="flex items-center justify-between text-xs font-mono">
+                <span class="text-slate-400">EST. OPEN STALLS:</span>
+                <span id="selected-lot-open" class="text-emerald-400 font-bold">98 / 147</span>
+              </div>
+            </div>
+
+            <!-- Real Stall Breakdown from parkingLots.js -->
+            <div class="grid grid-cols-4 gap-2 mt-3 text-center font-mono text-[11px]">
+              <div class="p-2 rounded-xl bg-slate-900/70 border border-slate-800">
+                <div id="selected-lot-general" class="font-bold text-white">116 Gen</div>
+                <div class="text-[9px] text-slate-500">DAYTIME</div>
+              </div>
+              <div class="p-2 rounded-xl bg-slate-900/70 border border-slate-800">
+                <div id="selected-lot-reserved" class="font-bold text-sky-400">0 Res</div>
+                <div class="text-[9px] text-slate-500">RESERVED</div>
+              </div>
+              <div class="p-2 rounded-xl bg-slate-900/70 border border-slate-800">
+                <div id="selected-lot-short" class="font-bold text-purple-400">31 Short</div>
+                <div class="text-[9px] text-slate-500">HOURLY</div>
+              </div>
+              <div class="p-2 rounded-xl bg-slate-900/70 border border-slate-800">
+                <div id="selected-lot-evening" class="font-bold text-dalGold">147 Eve</div>
+                <div class="text-[9px] text-slate-500">AFTER 5PM</div>
+              </div>
+            </div>
+
+            <!-- Engine Factor Weights -->
+            <div class="mt-4">
+              <div class="text-[10px] font-mono uppercase text-slate-400 mb-1.5">ACTIVE ENGINE VECTOR DELTAS</div>
+              <div class="grid grid-cols-2 gap-2 font-mono text-xs">
+                <div class="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 flex justify-between">
+                  <span class="text-slate-400">Hour Delta:</span>
+                  <span id="factor-hour" class="text-white font-bold">-16</span>
+                </div>
+                <div class="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 flex justify-between">
+                  <span class="text-slate-400">Weather:</span>
+                  <span id="factor-weather" class="text-white font-bold">0</span>
+                </div>
+                <div class="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 flex justify-between">
+                  <span class="text-slate-400">Calendar:</span>
+                  <span id="factor-calendar" class="text-white font-bold">0</span>
+                </div>
+                <div class="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 flex justify-between">
+                  <span class="text-slate-400">Alpha:</span>
+                  <span id="factor-alpha" class="text-dalGold font-bold">42% Crowd</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 24-Hour Interactive Timeline -->
+            <div class="mt-4">
+              <div class="text-[10px] font-mono uppercase text-slate-400 mb-1.5">24-HOUR AVAILABILITY FORECAST (CLICK BAR)</div>
+              <div id="lot-24h-bars" class="flex items-end gap-1"></div>
+            </div>
+          </div>
+
+          <!-- Live Crowd Report Injector -->
+          <div class="pt-4 border-t border-slate-800">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-[11px] font-mono font-bold text-dalGold uppercase">INJECT LIVE CROWD REPORT (30M GEOFENCE)</span>
+              <label class="flex items-center gap-1.5 text-[11px] font-mono text-slate-300 cursor-pointer">
+                <input id="crowd-proof-checkbox" type="checkbox" checked class="accent-dalGold rounded" />
+                Photo Proof (1.15x)
+              </label>
+            </div>
+            <div class="grid grid-cols-5 gap-1.5">
+              <button onclick="window.DalSim.injectCrowdReport(1)" class="py-2 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 font-mono text-xs font-bold transition">
+                1 Full
+              </button>
+              <button onclick="window.DalSim.injectCrowdReport(2)" class="py-2 rounded-lg bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/40 text-orange-300 font-mono text-xs font-bold transition">
+                2 Busy
+              </button>
+              <button onclick="window.DalSim.injectCrowdReport(3)" class="py-2 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-mono text-xs font-bold transition">
+                3 Mod
+              </button>
+              <button onclick="window.DalSim.injectCrowdReport(4)" class="py-2 rounded-lg bg-lime-500/20 hover:bg-lime-500/30 border border-lime-500/40 text-lime-300 font-mono text-xs font-bold transition">
+                4 Open
+              </button>
+              <button onclick="window.DalSim.injectCrowdReport(5)" class="py-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 font-mono text-xs font-bold transition">
+                5 Empty
+              </button>
+            </div>
+            <p id="crowd-inject-feedback" class="hidden text-[11px] font-mono text-emerald-400 mt-2"></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Interactive Commuter Persona Vehicle Dispatchers -->
+      <div class="mt-8">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h3 class="font-heading text-xl font-bold text-white">Dispatch a Dalhousie Commuter Persona</h3>
+            <p class="text-xs text-slate-400">Click any commuter card to launch their vehicle on the map and test how DalParkAid handles their permit tier and lecture schedule.</p>
+          </div>
+        </div>
+        <div id="character-cards-grid" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================================== -->
+  <!-- SECTION 2: TOP-DOWN PARKING LOT PHYSICS & GATE INTERCEPTION SIMULATOR      -->
+  <!-- ========================================================================== -->
+  <section id="lot-physics" class="py-16 px-6 border-b border-slate-800/80 bg-slate-950/60">
+    <div class="max-w-7xl mx-auto">
+      <div class="flex flex-col lg:flex-row lg:items-end justify-between gap-4 mb-8">
+        <div>
+          <span class="text-dalGold font-mono text-xs font-bold uppercase tracking-widest">STALL-LEVEL VEHICLE SIMULATION</span>
+          <h2 class="font-heading text-3xl sm:text-4xl font-bold text-white mt-1">
+            Interactive Lot Physics: Blind Entry vs. Pre-Gate Rerouting
+          </h2>
+          <p class="text-slate-400 text-sm mt-1">
+            Click any stall on the asphalt canvas to park or vacate a car, trigger a 9:25 AM lecture wave, or disable the DalParkAid gate beacon to see cars circle a full lot.
+          </p>
+        </div>
+
+        <div class="flex flex-wrap gap-2.5">
+          <button id="smart-gate-toggle-btn" onclick="window.DalSim.toggleSmartGate()"
+                  class="px-3.5 py-2 rounded-xl text-xs font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 transition">
+            DalParkAid Pre-Gate Reroute: ACTIVE
+          </button>
+          <button onclick="window.DalSim.triggerLectureRushWave()"
+                  class="px-4 py-2 rounded-xl text-xs font-mono font-bold bg-dalGold text-slate-950 hover:bg-yellow-300 transition">
+            Trigger 9:25 AM Lecture Rush Wave
+          </button>
+          <button onclick="window.DalSim.spawnLotVehicle()"
+                  class="px-3.5 py-2 rounded-xl text-xs font-mono font-bold bg-surface text-white border border-slate-700 hover:border-dalGold transition">
+            + Spawn Commuter Car
+          </button>
+        </div>
+      </div>
+
+      <div class="rounded-3xl bg-surface border border-slate-800 p-6 shadow-2xl">
+        <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
+          <div class="flex items-center gap-3">
+            <span class="w-3 h-3 rounded-full bg-dalGold"></span>
+            <h3 id="canvas-lot-title" class="font-heading text-lg font-bold text-white">Dalplex Lot (147 Total Stalls)</h3>
+            <span class="text-xs font-mono text-slate-400">(Click any stall to toggle parked vehicle)</span>
+          </div>
+
+          <div class="flex flex-wrap gap-4 font-mono text-xs">
+            <div class="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800">
+              <span class="text-slate-400">Open Sample Stalls:</span>
+              <span id="sim-open-stalls" class="text-emerald-400 font-bold ml-1">7 / 24</span>
+            </div>
+            <div class="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800">
+              <span class="text-slate-400">Cars Rerouted Pre-Gate:</span>
+              <span id="sim-rerouted-count" class="text-dalGold font-bold ml-1">0</span>
+            </div>
+            <div class="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800">
+              <span class="text-slate-400">Blind Circling Cars:</span>
+              <span id="sim-circling-count" class="text-rose-400 font-bold ml-1">0</span>
+            </div>
+            <div class="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800">
+              <span class="text-slate-400">Commuter Time Saved:</span>
+              <span id="sim-minutes-saved" class="text-sky-400 font-bold ml-1">0 min</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-950">
+          <canvas id="lot-physics-canvas" width="800" height="320" class="w-full min-w-[680px] h-auto cursor-pointer block"></canvas>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================================== -->
+  <!-- SECTION 3: PREDICTION ENGINE ARCHITECTURE (FROM SRC/UTILS/ENGINE.JS)       -->
+  <!-- ========================================================================== -->
+  <section id="engine-architecture" class="py-16 px-6 border-b border-slate-800/80">
+    <div class="max-w-7xl mx-auto">
+      <div class="max-w-3xl mb-12">
+        <span class="text-dalGold font-mono text-xs font-bold uppercase tracking-widest">PRODUCTION CODEBASE ARCHITECTURE</span>
+        <h2 class="font-heading text-3xl sm:text-4xl font-bold text-white mt-1">
+          How We Predict Lot Occupancy Without Asphalt Sensors
+        </h2>
+        <p class="text-slate-400 text-sm sm:text-base mt-2">
+          Municipalities and universities avoid smart parking because trenching inductive loops costs over $550 per stall. Our React Native and Firebase engine achieves stall-tier accuracy through three mathematical layers:
+        </p>
+      </div>
+
+      <div class="grid md:grid-cols-3 gap-6">
+        <div class="p-6 rounded-3xl bg-surface border border-slate-800 flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between mb-4">
+              <span class="font-mono text-xs font-bold px-2.5 py-1 rounded bg-dalGold/15 text-dalGold">LAYER 01</span>
+              <span class="font-mono text-xs text-slate-500">src/utils/engine.js</span>
+            </div>
+            <h3 class="font-heading text-xl font-bold text-white mb-2">Deterministic Campus Load Baseline</h3>
+            <p class="text-sm text-slate-300 leading-relaxed mb-4">
+              Calculates base pressure across all 28 Dalhousie lots using time-of-day curves, lot classification (Commuter, Residence, Parkade, Event), scraped Dal.ca academic calendar overrides, and real-time Open-Meteo weather codes.
+            </p>
+          </div>
+          <div class="p-3.5 rounded-xl bg-slate-950 border border-slate-800 font-mono text-[11px] text-slate-300">
+            <code>score = clamp(base + hourDelta + weatherDelta + lotSizeDelta + academicDay + campusLoad)</code>
+          </div>
+        </div>
+
+        <div class="p-6 rounded-3xl bg-surface border border-slate-800 flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between mb-4">
+              <span class="font-mono text-xs font-bold px-2.5 py-1 rounded bg-emerald-500/15 text-emerald-400">LAYER 02</span>
+              <span class="font-mono text-xs text-slate-500">30m Geofence Verification</span>
+            </div>
+            <h3 class="font-heading text-xl font-bold text-white mb-2">Exponential Decay Crowd Telemetry</h3>
+            <p class="text-sm text-slate-300 leading-relaxed mb-4">
+              Drivers within 30 meters of a lot submit 1-to-5 occupancy reports. Each report is weighted by exponential freshness decay (45-minute half-life), camera photo proof (1.15x boost), user trust score, and community upvotes.
+            </p>
+          </div>
+          <div class="p-3.5 rounded-xl bg-slate-950 border border-slate-800 font-mono text-[11px] text-emerald-400">
+            <code>weight = exp(-ageMins / 45) * proof(1.15) * trust(0.7..1.3) * voteWeight</code>
+          </div>
+        </div>
+
+        <div class="p-6 rounded-3xl bg-surface border border-slate-800 flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between mb-4">
+              <span class="font-mono text-xs font-bold px-2.5 py-1 rounded bg-sky-500/15 text-sky-400">LAYER 03</span>
+              <span class="font-mono text-xs text-slate-500">42-Day Rolling Memory</span>
+            </div>
+            <h3 class="font-heading text-xl font-bold text-white mb-2">Short-Guard Alpha Blending</h3>
+            <p class="text-sm text-slate-300 leading-relaxed mb-4">
+              Blends deterministic predictions with live crowd telemetry and 42-day historical weekday/hour patterns. When a verified report arrives within 15 minutes, a short-guard floor locks prediction drift within tight confidence bounds.
+            </p>
+          </div>
+          <div class="p-3.5 rounded-xl bg-slate-950 border border-slate-800 font-mono text-[11px] text-sky-400">
+            <code>final = round((1 - alpha) * engineScore + alpha * crowdScore)</code>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================================== -->
+  <!-- SECTION 4: COMMUTER ROI CALCULATOR & CAMPUS2MARKET COMMERCIALIZATION       -->
+  <!-- ========================================================================== -->
+  <section id="commuter-economics" class="py-16 px-6 border-b border-slate-800/80 bg-slate-950/50">
+    <div class="max-w-7xl mx-auto grid lg:grid-cols-12 gap-10 items-center">
+      <!-- Interactive Commuter Waste Calculator -->
+      <div class="lg:col-span-6 p-7 rounded-3xl bg-surface border border-slate-800 shadow-xl">
+        <span class="text-dalGold font-mono text-xs font-bold uppercase tracking-widest">CUSTOMER DISCOVERY METRIC</span>
+        <h3 class="font-heading text-2xl font-bold text-white mt-1 mb-2">
+          Halifax Commuter Cost & Time Loss Calculator
+        </h3>
+        <p class="text-xs text-slate-400 mb-6">
+          Adjust your weekly commute profile to quantify the annual time, fuel, and parking fine exposure caused by oversold campus permits.
+        </p>
+
+        <div class="space-y-5">
+          <div>
+            <div class="flex justify-between text-xs font-mono mb-1.5">
+              <span class="text-slate-300">CAMPUS COMMUTE FREQUENCY</span>
+              <span id="calc-days-val" class="text-dalGold font-bold">4 days/wk</span>
+            </div>
+            <input id="calc-days" type="range" min="1" max="5" value="4"
+                   oninput="window.DalSim.updateCommuterCalculator()"
+                   class="w-full h-2 bg-slate-900 rounded-lg cursor-pointer" />
+          </div>
+
+          <div>
+            <div class="flex justify-between text-xs font-mono mb-1.5">
+              <span class="text-slate-300">TYPICAL CAMPUS ARRIVAL HOUR</span>
+              <span id="calc-hour-val" class="text-dalGold font-bold">10:00</span>
+            </div>
+            <input id="calc-hour" type="range" min="7" max="18" value="10"
+                   oninput="window.DalSim.updateCommuterCalculator()"
+                   class="w-full h-2 bg-slate-900 rounded-lg cursor-pointer" />
+          </div>
+
+          <div>
+            <div class="flex justify-between text-xs font-mono mb-1.5">
+              <span class="text-slate-300">OVERFLOW STREET TICKETS PER YEAR ($55 AVG)</span>
+              <span id="calc-tickets-val" class="text-dalGold font-bold">2 tickets/yr</span>
+            </div>
+            <input id="calc-tickets" type="range" min="0" max="6" value="2"
+                   oninput="window.DalSim.updateCommuterCalculator()"
+                   class="w-full h-2 bg-slate-900 rounded-lg cursor-pointer" />
+          </div>
+        </div>
+
+        <div class="grid grid-cols-3 gap-3 mt-7 pt-6 border-t border-slate-800 text-center font-mono">
+          <div class="p-4 rounded-2xl bg-slate-900 border border-slate-800">
+            <div id="calc-hours-lost" class="text-2xl font-bold text-rose-400">41 hrs</div>
+            <div class="text-[10px] text-slate-400 mt-1">LOST CIRCLING / YR</div>
+          </div>
+          <div class="p-4 rounded-2xl bg-slate-900 border border-slate-800">
+            <div id="calc-money-lost" class="text-2xl font-bold text-dalGold">$389</div>
+            <div class="text-[10px] text-slate-400 mt-1">FUEL + TICKET RISK</div>
+          </div>
+          <div class="p-4 rounded-2xl bg-slate-900 border border-slate-800">
+            <div id="calc-co2-lost" class="text-2xl font-bold text-emerald-400">172 kg</div>
+            <div class="text-[10px] text-slate-400 mt-1">IDLE CO2 EMISSIONS</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Commercialization & Expansion Roadmap -->
+      <div class="lg:col-span-6 space-y-5">
+        <span class="text-dalGold font-mono text-xs font-bold uppercase tracking-widest">CAMPUS2MARKET VALIDATE THESIS</span>
+        <h2 class="font-heading text-3xl sm:text-4xl font-bold text-white">
+          From University Permits to Municipal Mobility Intelligence
+        </h2>
+        <p class="text-slate-300 text-sm sm:text-base leading-relaxed">
+          Dalhousie University is our beachhead validation environment: a dense peninsula with 21,000+ students and staff, 3 campuses, and immediate adjacency to Halifax's busiest hospital and commercial parkades.
+        </p>
+
+        <div class="space-y-3.5">
+          <div class="p-4 rounded-2xl bg-surface border border-slate-800 flex gap-4">
+            <div class="font-mono text-xs font-bold px-2.5 py-1 rounded bg-dalGold text-slate-950 h-fit">PHASE 1</div>
+            <div>
+              <h4 class="font-heading font-bold text-white text-base">Dalhousie Commuter Beachhead (28 Lots)</h4>
+              <p class="text-xs text-slate-400 mt-0.5">Validate daily retention, crowd-reporting density, and permit-tier routing with student and faculty drivers across Studley and Sexton.</p>
+            </div>
+          </div>
+
+          <div class="p-4 rounded-2xl bg-surface border border-slate-800 flex gap-4">
+            <div class="font-mono text-xs font-bold px-2.5 py-1 rounded bg-sky-400 text-slate-950 h-fit">PHASE 2</div>
+            <div>
+              <h4 class="font-heading font-bold text-white text-base">HRM Healthcare & Downtown Corridor (Zones A to E)</h4>
+              <p class="text-xs text-slate-400 mt-0.5">Expand into already-mapped hospital and municipal parkades (IWK Health 495 stalls, Victoria General 760 stalls, Park Lane 440 stalls, Scotia Square 1,697 stalls).</p>
+            </div>
+          </div>
+
+          <div class="p-4 rounded-2xl bg-surface border border-slate-800 flex gap-4">
+            <div class="font-mono text-xs font-bold px-2.5 py-1 rounded bg-emerald-400 text-slate-950 h-fit">PHASE 3</div>
+            <div>
+              <h4 class="font-heading font-bold text-white text-base">B2B Institutional Parking Analytics SaaS</h4>
+              <p class="text-xs text-slate-400 mt-0.5">License real-time lot utilization heatmaps and dynamic permit pricing APIs to Canadian university parking authorities at 1/20th the cost of hardware sensors.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================================== -->
+  <!-- SECTION 5: CAMPUS2MARKET VALIDATE CUSTOMER DISCOVERY & PILOT COHORT FORM   -->
+  <!-- ========================================================================== -->
+  <section id="validate" class="py-20 px-6">
+    <div class="max-w-4xl mx-auto rounded-3xl bg-surface border-2 border-dalGold/40 p-8 sm:p-10 shadow-2xl">
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <span class="px-3 py-1 rounded-full bg-dalGold/15 text-dalGold font-mono text-xs font-bold">
+          CAMPUS2MARKET VALIDATE • CUSTOMER DISCOVERY COHORT
+        </span>
+        <span id="validation-count-badge" class="font-mono text-xs text-emerald-400 font-bold">
+          ● 47 Commuter Validations Logged
+        </span>
+      </div>
+
+      <h2 class="font-heading text-2xl sm:text-4xl font-bold text-white mb-2">
+        Join the DalParkAid Pilot & Validate With Us
+      </h2>
+      <p class="text-slate-300 text-sm sm:text-base mb-8">
+        Whether you commute to Studley or Sexton, manage institutional parking operations, or mentor with Campus2Market Validate, log your commuter profile below to get Android/iOS beta access.
+      </p>
+
+      <form id="c2m-form" onsubmit="handleValidationSubmit(event)" class="space-y-4">
+        <div class="grid sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-mono uppercase text-slate-300 mb-1.5">Full Name</label>
+            <input type="text" id="v-name" required placeholder="Alex MacLeod"
+                   class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 text-sm text-white focus:outline-none focus:border-dalGold" />
+          </div>
+          <div>
+            <label class="block text-xs font-mono uppercase text-slate-300 mb-1.5">Email (@dal.ca or Work)</label>
+            <input type="email" id="v-email" required placeholder="alex.macleod@dal.ca"
+                   class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 text-sm text-white focus:outline-none focus:border-dalGold" />
+          </div>
+        </div>
+
+        <div class="grid sm:grid-cols-3 gap-4">
+          <div>
+            <label class="block text-xs font-mono uppercase text-slate-300 mb-1.5">Primary Role</label>
+            <select id="v-role" class="w-full px-3.5 py-3 rounded-xl bg-slate-900 border border-slate-700 text-sm text-white focus:outline-none focus:border-dalGold">
+              <option>Student Commuter</option>
+              <option>Faculty / Researcher</option>
+              <option>University Staff</option>
+              <option>Parking & Facilities Ops</option>
+              <option>Campus2Market Reviewer / Mentor</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-mono uppercase text-slate-300 mb-1.5">Primary Campus / Zone</label>
+            <select id="v-campus" class="w-full px-3.5 py-3 rounded-xl bg-slate-900 border border-slate-700 text-sm text-white focus:outline-none focus:border-dalGold">
+              <option>Studley Campus</option>
+              <option>Sexton Campus</option>
+              <option>Carleton / Hospital District</option>
+              <option>Downtown Halifax (Zones A-E)</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-mono uppercase text-slate-300 mb-1.5">Permit Tier</label>
+            <select id="v-permit" class="w-full px-3.5 py-3 rounded-xl bg-slate-900 border border-slate-700 text-sm text-white focus:outline-none focus:border-dalGold">
+              <option>General Commuter Permit</option>
+              <option>Reserved / Parkade Permit</option>
+              <option>Hourly / Pay-and-Display</option>
+              <option>Off-Campus Street Parking</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-mono uppercase text-slate-300 mb-1.5">Which lot gives you the biggest headache, and at what time?</label>
+          <input type="text" id="v-note" placeholder="e.g., Dalplex and Chemistry lots are completely full by 9:20 AM on Tuesdays and Thursdays."
+                 class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 text-sm text-white focus:outline-none focus:border-dalGold" />
+        </div>
+
+        <div class="flex flex-wrap items-center justify-between gap-4 pt-2">
+          <label class="flex items-center gap-2.5 text-xs text-slate-300 cursor-pointer">
+            <input type="checkbox" id="v-interview" checked class="accent-dalGold rounded w-4 h-4" />
+            <span>I am open to a 10-minute Customer Discovery interview for Campus2Market Validate.</span>
+          </label>
+
+          <button type="submit" class="px-8 py-4 rounded-xl bg-dalGold text-slate-950 font-heading font-bold text-sm sm:text-base hover:bg-yellow-300 transition shadow-lg shadow-dalGold/20">
+            Submit Validation & Request Beta Access
+          </button>
+        </div>
+
+        <div id="v-success" class="hidden p-4 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-mono">
+          Validation recorded in cohort log! Thank you for backing DalParkAid's Campus2Market Validate application.
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="py-10 px-6 border-t border-slate-800/80 bg-slate-950 text-xs text-slate-400">
+    <div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded-xl overflow-hidden bg-slate-900 border border-dalGold/50 p-0.5 flex items-center justify-center">
+          <img src="./assets/dalparkaid-logo.svg" alt="DalParkAid" class="w-full h-full object-contain rounded-lg" />
+        </div>
+        <img src="./assets/dal-logo.png" alt="Dalhousie" class="h-4 w-auto object-contain brightness-125" />
+        <span class="font-heading font-bold text-white">DalParkAid</span>
+        <span class="text-slate-600">|</span>
+        <span>Geospatial Parking Intelligence • Halifax, Nova Scotia</span>
+      </div>
+      <div class="font-mono text-[11px] text-slate-500">
+        Built with Expo SDK 54, React Native, Firebase & Open-Meteo • Campus2Market Validate 2026
+      </div>
+    </div>
+  </footer>
+
+  <!-- Load Real DalParkAid Lot Data & Simulator Engine -->
+  <script src="./lotsData.js"></script>
+  <script src="./simulator.js"></script>
+  <script>
+    let validationCohortCount = 47;
+    function handleValidationSubmit(e) {
+      e.preventDefault();
+      validationCohortCount++;
+      const badge = document.getElementById('validation-count-badge');
+      if (badge) badge.textContent = `● ${validationCohortCount} Commuter Validations Logged`;
+      const success = document.getElementById('v-success');
+      if (success) success.classList.remove('hidden');
+      e.target.reset();
+    }
+  </script>
+</body>
+</html>

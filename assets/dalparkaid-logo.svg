@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <defs>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFE66D" />
+      <stop offset="50%" stop-color="#F2C94C" />
+      <stop offset="100%" stop-color="#D97706" />
+    </linearGradient>
+    <linearGradient id="shieldBg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#131F37" />
+      <stop offset="100%" stop-color="#070C18" />
+    </linearGradient>
+    <radialGradient id="beaconGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#22C55E" stop-opacity="0.8" />
+      <stop offset="100%" stop-color="#22C55E" stop-opacity="0" />
+    </radialGradient>
+    <filter id="goldGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#F2C94C" flood-opacity="0.35" />
+    </filter>
+  </defs>
+
+  <!-- Squircle Base Shield -->
+  <rect x="8" y="8" width="104" height="104" rx="28" fill="url(#shieldBg)" stroke="url(#goldGrad)" stroke-width="3" filter="url(#goldGlow)" />
+
+  <!-- Subtle Street Grid Coordinates -->
+  <path d="M 24 60 L 96 60" stroke="#1E2E4E" stroke-width="2" stroke-dasharray="4 4" />
+  <path d="M 60 24 L 60 96" stroke="#1E2E4E" stroke-width="2" stroke-dasharray="4 4" />
+  <circle cx="60" cy="60" r="38" stroke="#1E2E4E" stroke-width="1.5" fill="none" opacity="0.6" />
+
+  <!-- Radar Pulse Rings -->
+  <circle cx="76" cy="44" r="18" stroke="#22C55E" stroke-width="1.5" fill="none" opacity="0.3" />
+  <circle cx="76" cy="44" r="10" stroke="#22C55E" stroke-width="1.5" fill="none" opacity="0.6" />
+  <circle cx="76" cy="44" r="5" fill="#22C55E" />
+
+  <!-- Bold Geometric "P" Symbol -->
+  <!-- Stem -->
+  <rect x="36" y="32" width="14" height="56" rx="7" fill="url(#goldGrad)" />
+  <!-- Upper Loop -->
+  <path d="M 43 32 L 66 32 C 78 32 86 40 86 51 C 86 62 78 70 66 70 L 43 70 Z" fill="url(#goldGrad)" />
+  <!-- Inner Loop Cutout (Forming an Open Parking Stall) -->
+  <path d="M 50 44 L 64 44 C 69 44 73 47 73 51 C 73 55 69 58 64 58 L 50 58 Z" fill="#0B1424" />
+
+  <!-- Active Geospatial Beacon on the P -->
+  <circle cx="64" cy="51" r="3.5" fill="#22C55E" />
+</svg>
