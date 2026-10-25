@@ -1,231 +1,179 @@
-// DalParkAid Geospatial Telemetry, Prediction Engine & Top-Down Vehicle Physics Simulator
-// Ported from src/utils/engine.js with real-time Leaflet & HTML5 Canvas rendering
+// DalParkAid Interactive Campus Map, Commuter Dispatch & Lot Simulator
+// Redesigned around Jakob Nielsen's 10 Usability Heuristics (Proprietary scoring details abstracted)
 
 (function () {
-  const BASE_SCORE = 55;
-  const FRESHNESS_DECAY_MINS = 45;
-  const MAX_CROWD_ALPHA = 0.9;
-  const CROWD_CONFIDENCE_CURVE_K = 2.2;
-
-  const dayAdjustment = [10, -3, -4, -5, -4, -1, 7];
-  const hourAdjustment = [
+  // Internal scoring lookup tables (kept private inside closure, never exposed in UI)
+  const _base = 55;
+  const _dayAdj = [10, -3, -4, -5, -4, -1, 7];
+  const _hourAdj = [
     22, 22, 22, 20, 18, 14,
     6, -2, -8, -12, -16, -18,
     -18, -18, -15, -12, -8, -2,
     4, 8, 12, 15, 17, 18
   ];
-
-  const ratingScoreMap = { 1: 10, 2: 30, 3: 50, 4: 72, 5: 88 };
-
-  const academicDayAdjustment = {
+  const _ratingMap = { 1: 10, 2: 30, 3: 50, 4: 72, 5: 88 };
+  const _calAdj = {
     TEACHING_DAY: 0,
-    FRIDAY_SCHEDULE_OVERRIDE: -2,
     EXAM_PERIOD: 2,
     READING_WEEK: 16,
-    WINTER_BREAK: 20,
     UNIVERSITY_CLOSED: 32
   };
 
+  // Heuristic #2: Match between system and real world (clear, human-friendly status labels)
   const STATUS_META = {
-    EMPTY: { label: 'Empty', color: '#22C55E', bg: 'rgba(34,197,94,0.16)', border: '#22C55E' },
-    NORMAL: { label: 'Normal', color: '#84CC16', bg: 'rgba(132,204,22,0.16)', border: '#84CC16' },
-    CROWDED: { label: 'Crowded', color: '#F59E0B', bg: 'rgba(245,158,11,0.16)', border: '#F59E0B' },
-    ALMOST_FULL: { label: 'Almost Full', color: '#EF4444', bg: 'rgba(239,68,68,0.16)', border: '#EF4444' },
-    FULL: { label: 'Full', color: '#FF2E2E', bg: 'rgba(255,46,46,0.20)', border: '#FF2E2E' }
+    EMPTY: { label: 'Plenty of Spots', short: 'Open', color: '#22C55E', bg: 'rgba(34,197,94,0.16)', border: '#22C55E' },
+    NORMAL: { label: 'Good Availability', short: 'Good', color: '#84CC16', bg: 'rgba(132,204,22,0.16)', border: '#84CC16' },
+    CROWDED: { label: 'Filling Up', short: 'Busy', color: '#F59E0B', bg: 'rgba(245,158,11,0.16)', border: '#F59E0B' },
+    ALMOST_FULL: { label: 'Almost Full', short: 'Low', color: '#EF4444', bg: 'rgba(239,68,68,0.16)', border: '#EF4444' },
+    FULL: { label: 'Lot Full', short: 'Full', color: '#FF2E2E', bg: 'rgba(255,46,46,0.20)', border: '#FF2E2E' }
   };
 
-  // Global Simulator State
   const state = {
     hour: 10,
-    weekday: 2, // Tuesday peak
-    weatherType: 'CLEAR', // CLEAR, RAIN, SNOW, FOG, STORM
+    weekday: 2,
+    weatherType: 'CLEAR',
     weatherTempC: 11,
     weatherWindKmh: 18,
-    liveWeatherLoaded: false,
     academicDayType: 'TEACHING_DAY',
-    campusLoadIndex: 0.72,
-    campusFilter: 'all', // all, studley, sexton, hrm-expansion
-    showHrmExpansion: false,
+    campusFilter: 'all',
+    permitFilter: 'GENERAL', // GENERAL, RESERVED, SHORT_TERM
     selectedLotId: 'studley-dalplex',
-    activeCharacterId: 'maya',
+    activeCharacterId: null,
+    lastReportHistory: [], // For Heuristic #3: Undo Last Report
     injectedReports: {
-      'studley-chemistry': [{ rating: 1, ageMins: 6, hasProof: true, voteMultiplier: 1.5 }],
-      'studley-biology': [{ rating: 4, ageMins: 9, hasProof: true, voteMultiplier: 1.3 }],
-      'studley-dalplex': [{ rating: 3, ageMins: 14, hasProof: true, voteMultiplier: 1.2 }],
-      'sexton-rosina-lot': [{ rating: 4, ageMins: 8, hasProof: false, voteMultiplier: 1.1 }]
+      'studley-chemistry': [{ rating: 1, ageMins: 6 }],
+      'studley-biology': [{ rating: 4, ageMins: 9 }],
+      'studley-dalplex': [{ rating: 3, ageMins: 14 }],
+      'sexton-rosina-lot': [{ rating: 4, ageMins: 8 }]
     }
   };
 
   const clamp = (n, min = 0, max = 100) => Math.max(min, Math.min(max, n));
 
-  function getWeatherAdjustment(type) {
-    switch (type) {
-      case 'STORM': return -12;
-      case 'SNOW': return -10;
-      case 'RAIN': return -8;
-      case 'FOG': return -4;
-      default: return 0;
-    }
-  }
-
-  function getLotSizeAdjustment(capacity) {
-    if (capacity >= 120) return 9;
-    if (capacity >= 80) return 5;
-    if (capacity >= 40) return 0;
-    if (capacity >= 20) return -5;
-    return -9;
-  }
-
-  function getLotTypeTimeAdjustment(lotType, hour) {
-    switch (lotType) {
-      case 'RESIDENCE_LOT':
-        if (hour <= 6) return -6;
-        if (hour <= 16) return 6;
-        return -8;
-      case 'PARKADE_LOT':
-        return 2;
-      case 'EVENT_LOT':
-        if (hour >= 7 && hour <= 14) return 3;
-        if (hour >= 17 && hour <= 22) return -8;
-        return 0;
-      default:
-        return 0;
-    }
-  }
-
-  function scoreToStatus(n) {
-    if (n >= 80) return 'EMPTY';
-    if (n >= 58) return 'NORMAL';
-    if (n >= 36) return 'CROWDED';
-    if (n >= 16) return 'ALMOST_FULL';
-    return 'FULL';
+  // Heuristic #1: Visibility of system status via non-intrusive toast feedback
+  let toastTimeout = null;
+  function showToast(message) {
+    const el = document.getElementById('status-toast');
+    const txt = document.getElementById('status-toast-text');
+    if (!el || !txt) return;
+    txt.textContent = message;
+    el.classList.remove('hidden', 'opacity-0');
+    el.classList.add('opacity-100');
+    if (toastTimeout) clearTimeout(toastTimeout);
+    toastTimeout = setTimeout(() => {
+      el.classList.add('opacity-0');
+      setTimeout(() => el.classList.add('hidden'), 250);
+    }, 3200);
   }
 
   function isEveningHour(hour) {
+    // Official Dalhousie evening window starts after 4:30 PM (modeled at 17:00 on hourly slider) until 1:30 AM
     return hour >= 17 || hour < 6;
   }
 
-  function computeLotTelemetry(lot, customHour = state.hour) {
-    const evening = isEveningHour(customHour);
-    const usableCapacity = evening
-      ? (lot.eveningGeneralSpaces || 0) + (lot.eveningShortTermSpaces || 0)
-      : (lot.generalSpaces || 0) + (lot.shortTermSpaces || 0);
+  function isOvernightBanHour(hour) {
+    // Official Dalhousie overnight parking ban: 1:30 AM to 6:00 AM
+    return hour >= 2 && hour < 6;
+  }
 
+  function computeLotStatus(lot, customHour = state.hour) {
+    const evening = isEveningHour(customHour);
     const physicalCapacity = Math.max(
       (lot.generalSpaces || 0) + (lot.reservedSpaces || 0) + (lot.shortTermSpaces || 0),
       (lot.eveningGeneralSpaces || 0) + (lot.eveningShortTermSpaces || 0)
     );
 
-    const refCapacity = Math.max(
-      usableCapacity,
-      (lot.generalSpaces || 0) + (lot.shortTermSpaces || 0) + (lot.reservedSpaces || 0) * 0.35
-    );
+    const wAdj = state.weatherType === 'STORM' ? -12
+      : state.weatherType === 'SNOW' ? -10
+      : state.weatherType === 'RAIN' ? -8 : 0;
 
-    // Deterministic subtle variation by lot coordinates so lots don't look identical
-    const spatialSeed = Math.round(((lot.coordinate.latitude * 1000) % 7) - 3);
+    const sizeAdj = physicalCapacity >= 120 ? 9 : physicalCapacity >= 80 ? 5 : physicalCapacity >= 40 ? 0 : -6;
+    const seed = Math.round(((lot.coordinate.latitude * 1000) % 7) - 3);
 
-    const factors = {
-      base: BASE_SCORE,
-      hour: hourAdjustment[customHour] ?? 0,
-      day: dayAdjustment[state.weekday] ?? 0,
-      weather: getWeatherAdjustment(state.weatherType),
-      lotSize: getLotSizeAdjustment(refCapacity),
-      academicDay: academicDayAdjustment[state.academicDayType] ?? 0,
-      campusLoad: Math.round(8 - clamp(state.campusLoadIndex, 0, 1) * 20),
-      lotTypeTime: getLotTypeTimeAdjustment(lot.lotType, customHour),
-      spatialSeed
-    };
-
-    const engineScore = clamp(
+    let score = clamp(
       Math.round(
-        factors.base +
-        factors.hour +
-        factors.day +
-        factors.weather +
-        factors.lotSize +
-        factors.academicDay +
-        factors.campusLoad +
-        factors.lotTypeTime +
-        factors.spatialSeed
+        _base +
+        (_hourAdj[customHour] ?? 0) +
+        (_dayAdj[state.weekday] ?? 0) +
+        wAdj +
+        sizeAdj +
+        (_calAdj[state.academicDayType] ?? 0) -
+        6 +
+        seed
       )
     );
 
-    // Crowd report aggregation (from src/utils/engine.js)
     const reports = customHour === state.hour ? (state.injectedReports[lot.id] || []) : [];
-    let finalScore = engineScore;
-    let alpha = 0;
-    let crowdScore = null;
-
     if (reports.length > 0) {
-      let totalWeight = 0;
-      let weightedSum = 0;
-      reports.forEach(r => {
-        const freshness = Math.exp(-r.ageMins / FRESHNESS_DECAY_MINS);
-        const proof = r.hasProof ? 1.15 : 1.0;
-        const w = freshness * proof * (r.voteMultiplier || 1.0);
-        totalWeight += w;
-        weightedSum += (ratingScoreMap[r.rating] || 50) * w;
-      });
-      if (totalWeight > 0) {
-        crowdScore = Math.round(weightedSum / totalWeight);
-        const confidenceBase = MAX_CROWD_ALPHA * (1 - Math.exp(-totalWeight / CROWD_CONFIDENCE_CURVE_K));
-        alpha = Math.min(MAX_CROWD_ALPHA, Math.max(0.38, confidenceBase + 0.08));
-        finalScore = clamp(Math.round((1 - alpha) * engineScore + alpha * crowdScore));
+      const avgCrowd = reports.reduce((s, r) => s + (_ratingMap[r.rating] || 50), 0) / reports.length;
+      score = clamp(Math.round(score * 0.45 + avgCrowd * 0.55));
+    }
+
+    const statusKey = score >= 80 ? 'EMPTY'
+      : score >= 58 ? 'NORMAL'
+      : score >= 36 ? 'CROWDED'
+      : score >= 16 ? 'ALMOST_FULL' : 'FULL';
+
+    const estOpenSpaces = Math.max(0, Math.round((score / 100) * physicalCapacity));
+
+    // Heuristic #5: Error Prevention (Check if lot supports the user's selected permit at this hour)
+    let permitCompatible = true;
+    let permitWarning = null;
+
+    if (isOvernightBanHour(customHour)) {
+      permitCompatible = false;
+      permitWarning = 'Overnight Restriction: No general parking permitted between 1:30 AM and 6:00 AM without a special overnight pass.';
+    } else if (!evening) {
+      if (state.permitFilter === 'GENERAL' && (lot.generalSpaces || 0) === 0 && lot.campus !== 'hrm-expansion') {
+        permitCompatible = false;
+        permitWarning = `Permit Notice: ${lot.name} has 0 daytime General Permit stalls (${lot.reservedSpaces} Reserved, ${lot.shortTermSpaces} Short-Term). General access opens after 4:30 PM.`;
+      } else if (state.permitFilter === 'SHORT_TERM' && (lot.shortTermSpaces || 0) === 0 && lot.campus !== 'hrm-expansion') {
+        permitCompatible = false;
+        permitWarning = `Permit Notice: ${lot.name} does not offer daytime Short-Term hourly spaces.`;
       }
     }
 
-    const statusKey = scoreToStatus(finalScore);
-    const estOpenSpaces = Math.max(0, Math.round((finalScore / 100) * physicalCapacity));
-    const occupiedSpaces = Math.max(0, physicalCapacity - estOpenSpaces);
-
     return {
       lot,
-      engineScore,
-      crowdScore,
-      alpha: Math.round(alpha * 100),
-      finalScore,
+      score,
       statusKey,
       statusMeta: STATUS_META[statusKey],
       evening,
-      usableCapacity,
       physicalCapacity,
       estOpenSpaces,
-      occupiedSpaces,
-      factors,
-      reportCount: reports.length
+      reportCount: reports.length,
+      permitCompatible,
+      permitWarning
     };
   }
 
   function getActiveLots() {
     let list = [...window.DAL_LOTS];
-    if (state.showHrmExpansion || state.campusFilter === 'hrm-expansion') {
-      list = list.concat(window.HRM_EXPANSION_LOTS);
-    }
-    if (state.campusFilter !== 'all') {
+    if (state.campusFilter === 'hrm-expansion') {
+      list = [...window.HRM_EXPANSION_LOTS];
+    } else if (state.campusFilter !== 'all') {
       list = list.filter(l => l.campus === state.campusFilter);
     }
     return list;
   }
 
   // ============================================================================
-  // 1. GEOSPATIAL COMMAND MAP (LEAFLET + ANIMATED VEHICLES & RADAR CONES)
+  // 1. INTERACTIVE CAMPUS MAP (GOOGLE MAPS + OPENSTREETMAP FALLBACK)
   // ============================================================================
   let map = null;
   let markersLayer = null;
   let vehicleLayer = null;
-  let routePolyline = null;
-  let rejectedMarker = null;
   let activeVehicleMarker = null;
   let vehicleAnimFrame = null;
   let currentTileLayer = null;
 
   const tileProviders = {
-    googleHybrid: L.tileLayer('https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
+    googleRoads: L.tileLayer('https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
       maxZoom: 20,
       subdomains: ['0', '1', '2', '3'],
       attribution: 'Google Maps'
     }),
-    googleRoads: L.tileLayer('https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
+    googleHybrid: L.tileLayer('https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
       maxZoom: 20,
       subdomains: ['0', '1', '2', '3'],
       attribution: 'Google Maps'
@@ -236,21 +184,11 @@
     })
   };
 
-  // Automatic error fallback: If Google Maps fails to load, gracefully fall back to OpenStreetMap
   tileProviders.googleHybrid.on('tileerror', function () {
-    if (currentTileLayer === tileProviders.googleHybrid) {
-      setMapTileStyle('osm');
-      const badge = document.getElementById('map-engine-badge');
-      if (badge) badge.textContent = 'FALLBACK: OPENSTREETMAP ACTIVE';
-    }
+    if (currentTileLayer === tileProviders.googleHybrid) setMapTileStyle('osm');
   });
-
   tileProviders.googleRoads.on('tileerror', function () {
-    if (currentTileLayer === tileProviders.googleRoads) {
-      setMapTileStyle('osm');
-      const badge = document.getElementById('map-engine-badge');
-      if (badge) badge.textContent = 'FALLBACK: OPENSTREETMAP ACTIVE';
-    }
+    if (currentTileLayer === tileProviders.googleRoads) setMapTileStyle('osm');
   });
 
   function setMapTileStyle(styleKey) {
@@ -259,20 +197,9 @@
     currentTileLayer = tileProviders[styleKey];
     currentTileLayer.addTo(map);
 
-    const badge = document.getElementById('map-engine-badge');
-    if (badge) {
-      if (styleKey.startsWith('google')) {
-        badge.textContent = 'GOOGLE MAPS SDK ENGINE';
-        badge.className = 'hidden sm:inline-block px-2 py-0.5 rounded bg-sky-500/15 text-sky-400 border border-sky-500/30 text-[9px] font-mono font-bold mr-1';
-      } else {
-        badge.textContent = 'OPENSTREETMAP FALLBACK ENGINE';
-        badge.className = 'hidden sm:inline-block px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-[9px] font-mono font-bold mr-1';
-      }
-    }
-
     document.querySelectorAll('.map-style-btn').forEach(btn => {
       const active = btn.dataset.style === styleKey;
-      btn.className = `map-style-btn px-2.5 py-1 rounded-md text-[10px] font-mono font-bold transition ${
+      btn.className = `map-style-btn px-2.5 py-1 rounded-md text-[11px] font-semibold transition ${
         active ? 'bg-amber-400 text-slate-950 font-bold' : 'bg-slate-900 text-slate-300 hover:bg-slate-800'
       }`;
     });
@@ -291,16 +218,42 @@
 
     L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-    // Default to Google Streets tile layer with automatic OSM fallback
     currentTileLayer = tileProviders.googleRoads;
     currentTileLayer.addTo(map);
 
     markersLayer = L.layerGroup().addTo(map);
     vehicleLayer = L.layerGroup().addTo(map);
 
+    populateQuickLotSelect();
     renderMapMarkers();
     renderCharacterCards();
     updateSelectedLotHUD();
+  }
+
+  // Heuristic #6: Recognition rather than recall (Quick Jump Dropdown for all 28 lots)
+  function populateQuickLotSelect() {
+    const select = document.getElementById('quick-lot-select');
+    if (!select) return;
+    const allLots = [...window.DAL_LOTS, ...window.HRM_EXPANSION_LOTS];
+    select.innerHTML = allLots.map(lot => {
+      const tag = lot.campus === 'hrm-expansion' ? 'HRM' : lot.campus === 'sexton' ? 'Sexton' : 'Studley';
+      return `<option value="${lot.id}" ${lot.id === state.selectedLotId ? 'selected' : ''}>${tag}: ${lot.name}</option>`;
+    }).join('');
+  }
+
+  function selectLotById(lotId, fly = true) {
+    state.selectedLotId = lotId;
+    const allLots = [...window.DAL_LOTS, ...window.HRM_EXPANSION_LOTS];
+    const lot = allLots.find(l => l.id === lotId);
+    const select = document.getElementById('quick-lot-select');
+    if (select) select.value = lotId;
+
+    if (lot && map && fly) {
+      map.flyTo([lot.coordinate.latitude, lot.coordinate.longitude], 16, { duration: 0.6 });
+    }
+    renderMapMarkers();
+    updateSelectedLotHUD();
+    if (lot) syncLotPhysicsToSelected(lot);
   }
 
   function renderMapMarkers() {
@@ -312,17 +265,18 @@
     let totalCap = 0;
 
     lots.forEach(lot => {
-      const t = computeLotTelemetry(lot);
+      const t = computeLotStatus(lot);
       totalOpen += t.estOpenSpaces;
       totalCap += t.physicalCapacity;
 
       const isSelected = lot.id === state.selectedLotId;
       const size = isSelected ? 42 : 32;
+      const dimClass = !t.permitCompatible ? 'opacity-55' : '';
 
       const html = `
-        <div class="lot-pin-wrapper ${isSelected ? 'is-selected' : ''}" style="width:${size}px;height:${size}px;">
+        <div class="lot-pin-wrapper ${isSelected ? 'is-selected' : ''} ${dimClass}" style="width:${size}px;height:${size}px;">
           <div class="lot-pin-pulse" style="border-color:${t.statusMeta.color}; background:${t.statusMeta.bg}"></div>
-          <div class="lot-pin-core" style="background:${t.statusMeta.color}; box-shadow: 0 0 14px ${t.statusMeta.color};">
+          <div class="lot-pin-core" style="background:${t.statusMeta.color}; box-shadow: 0 0 12px ${t.statusMeta.color};">
             <span>${t.estOpenSpaces}</span>
           </div>
           ${isSelected ? `<div class="lot-pin-label">${lot.name}</div>` : ''}
@@ -338,15 +292,11 @@
 
       const marker = L.marker([lot.coordinate.latitude, lot.coordinate.longitude], { icon });
       marker.on('click', () => {
-        state.selectedLotId = lot.id;
-        renderMapMarkers();
-        updateSelectedLotHUD();
-        syncLotPhysicsToSelected(lot);
+        selectLotById(lot.id, false);
       });
       marker.addTo(markersLayer);
     });
 
-    // Update top map telemetry counters
     const openEl = document.getElementById('hud-total-open');
     const capEl = document.getElementById('hud-total-cap');
     const occEl = document.getElementById('hud-occupancy-pct');
@@ -358,10 +308,34 @@
     }
   }
 
+  // Heuristic #9: Help users recognize, diagnose, and recover from errors (Find nearest open compatible lot)
+  function findNearestRecommendedLot(referenceLot) {
+    const candidates = window.DAL_LOTS
+      .filter(l => l.id !== referenceLot.id)
+      .map(l => computeLotStatus(l))
+      .filter(t => t.permitCompatible && t.estOpenSpaces >= 8);
+
+    if (candidates.length === 0) return null;
+
+    candidates.sort((a, b) => {
+      const distA = Math.hypot(
+        a.lot.coordinate.latitude - referenceLot.coordinate.latitude,
+        a.lot.coordinate.longitude - referenceLot.coordinate.longitude
+      );
+      const distB = Math.hypot(
+        b.lot.coordinate.latitude - referenceLot.coordinate.latitude,
+        b.lot.coordinate.longitude - referenceLot.coordinate.longitude
+      );
+      return distA - distB;
+    });
+
+    return candidates[0];
+  }
+
   function updateSelectedLotHUD() {
     const allLots = [...window.DAL_LOTS, ...window.HRM_EXPANSION_LOTS];
     const lot = allLots.find(l => l.id === state.selectedLotId) || window.DAL_LOTS[0];
-    const t = computeLotTelemetry(lot);
+    const t = computeLotStatus(lot);
 
     const setTxt = (id, val) => {
       const el = document.getElementById(id);
@@ -371,23 +345,16 @@
     setTxt('selected-lot-name', lot.name);
     setTxt('selected-lot-address', lot.address);
     setTxt('selected-lot-campus', lot.campus === 'hrm-expansion' ? lot.halifaxZone : `${lot.campus.toUpperCase()} CAMPUS`);
-    setTxt('selected-lot-type', lot.lotType.replace('_', ' '));
-    setTxt('selected-lot-score', `${t.finalScore}/100`);
-    setTxt('selected-lot-open', `${t.estOpenSpaces} / ${t.physicalCapacity}`);
-    setTxt('selected-lot-general', `${lot.generalSpaces} Gen`);
-    setTxt('selected-lot-reserved', `${lot.reservedSpaces} Res`);
-    setTxt('selected-lot-short', `${lot.shortTermSpaces} Short`);
-    setTxt('selected-lot-evening', `${(lot.eveningGeneralSpaces || 0) + (lot.eveningShortTermSpaces || 0)} Eve`);
-
-    // Factor breakdown pills
-    setTxt('factor-hour', `${t.factors.hour >= 0 ? '+' : ''}${t.factors.hour}`);
-    setTxt('factor-weather', `${t.factors.weather >= 0 ? '+' : ''}${t.factors.weather}`);
-    setTxt('factor-calendar', `${t.factors.academicDay >= 0 ? '+' : ''}${t.factors.academicDay}`);
-    setTxt('factor-alpha', `${t.alpha}% Crowd Weight`);
+    setTxt('selected-lot-open', `${t.estOpenSpaces} of ${t.physicalCapacity} stalls`);
+    setTxt('selected-lot-general', `${lot.generalSpaces}`);
+    setTxt('selected-lot-reserved', `${lot.reservedSpaces}`);
+    setTxt('selected-lot-short', `${lot.shortTermSpaces}`);
+    setTxt('selected-lot-evening', `${(lot.eveningGeneralSpaces || 0) + (lot.eveningShortTermSpaces || 0)}`);
+    setTxt('selected-lot-reports-count', `${t.reportCount} recent check-in${t.reportCount === 1 ? '' : 's'}`);
 
     const badge = document.getElementById('selected-lot-status-badge');
     if (badge) {
-      badge.textContent = t.statusMeta.label.toUpperCase();
+      badge.textContent = t.statusMeta.label;
       badge.style.backgroundColor = t.statusMeta.bg;
       badge.style.color = t.statusMeta.color;
       badge.style.borderColor = t.statusMeta.border;
@@ -395,8 +362,36 @@
 
     const scoreBar = document.getElementById('selected-lot-score-bar');
     if (scoreBar) {
-      scoreBar.style.width = `${t.finalScore}%`;
+      scoreBar.style.width = `${t.score}%`;
       scoreBar.style.backgroundColor = t.statusMeta.color;
+    }
+
+    // Heuristic #5 & #9: Permit Warning + 1-Click Recovery Action
+    const alertBox = document.getElementById('lot-recovery-alert');
+    const alertText = document.getElementById('lot-recovery-text');
+    const alertBtn = document.getElementById('lot-recovery-btn');
+
+    if (alertBox && alertText && alertBtn) {
+      if (!t.permitCompatible || t.statusKey === 'FULL' || t.statusKey === 'ALMOST_FULL') {
+        const rec = findNearestRecommendedLot(lot);
+        alertBox.classList.remove('hidden');
+        alertText.textContent = !t.permitCompatible
+          ? t.permitWarning
+          : `${lot.name} is currently ${t.statusMeta.label.toLowerCase()} (${t.estOpenSpaces} stalls estimated).`;
+
+        if (rec) {
+          alertBtn.classList.remove('hidden');
+          alertBtn.textContent = `Switch to ${rec.lot.name} (${rec.estOpenSpaces} open stalls) →`;
+          alertBtn.onclick = () => {
+            selectLotById(rec.lot.id, true);
+            showToast(`Switched to ${rec.lot.name} (${rec.estOpenSpaces} open stalls)`);
+          };
+        } else {
+          alertBtn.classList.add('hidden');
+        }
+      } else {
+        alertBox.classList.add('hidden');
+      }
     }
 
     render24HourSparkline(lot);
@@ -408,13 +403,13 @@
 
     let html = '';
     for (let h = 6; h <= 22; h++) {
-      const t = computeLotTelemetry(lot, h);
+      const t = computeLotStatus(lot, h);
       const isCurrent = h === state.hour;
-      const heightPct = Math.max(12, t.finalScore);
+      const heightPct = Math.max(12, t.score);
       const label = h === 12 ? '12p' : h > 12 ? `${h - 12}p` : `${h}a`;
       html += `
-        <div onclick="window.DalSim.setHour(${h})" class="cursor-pointer flex-1 flex flex-col items-center group">
-          <div class="w-full h-16 bg-slate-900/90 rounded-md flex items-end p-0.5 border ${isCurrent ? 'border-amber-400' : 'border-slate-800/70'}">
+        <div onclick="window.DalSim.setHour(${h})" title="${label}: ~${t.estOpenSpaces} open stalls" class="cursor-pointer flex-1 flex flex-col items-center group">
+          <div class="w-full h-14 bg-slate-900/90 rounded-md flex items-end p-0.5 border ${isCurrent ? 'border-amber-400' : 'border-slate-800/70'}">
             <div class="w-full rounded-sm transition-all duration-300" style="height:${heightPct}%; background:${t.statusMeta.color}; opacity:${isCurrent ? '1' : '0.65'}"></div>
           </div>
           <span class="text-[9px] font-mono mt-1 ${isCurrent ? 'text-amber-400 font-bold' : 'text-slate-500'}">${label}</span>
@@ -425,12 +420,12 @@
   }
 
   // ============================================================================
-  // 2. INTERACTIVE COMMUTER CHARACTER DISPATCH & VEHICLE TELEMETRY
+  // 2. COMMUTER PERSONA DISPATCH & ROUTE PREVIEW
   // ============================================================================
   function getCharacterAvatarSVG(char) {
     const c = char.vehicleColor;
     return `
-      <svg viewBox="0 0 64 64" class="w-12 h-12 rounded-xl bg-slate-900 border border-slate-700/80 p-1 shrink-0">
+      <svg viewBox="0 0 64 64" class="w-11 h-11 rounded-xl bg-slate-900 border border-slate-700/80 p-1 shrink-0">
         <circle cx="32" cy="22" r="11" fill="${c}" opacity="0.9"/>
         <path d="M14 54 C14 40 50 40 50 54" fill="${c}" opacity="0.35" stroke="${c}" stroke-width="2.5"/>
         <circle cx="28" cy="21" r="1.8" fill="#0B1424"/>
@@ -461,24 +456,37 @@
                 <span class="px-2 py-0.5 text-[10px] font-mono font-semibold rounded bg-slate-800 text-amber-300">${char.schedule.split(' ')[0]}</span>
               </div>
               <p class="text-xs text-slate-400 truncate">${char.role}</p>
-              <p class="text-[11px] font-mono text-slate-500 truncate">${char.permit}</p>
+              <p class="text-[11px] text-slate-500 truncate">${char.permit}</p>
             </div>
           </div>
           <p class="text-xs text-slate-300 leading-relaxed mb-3">"${char.quote}"</p>
           <div class="flex items-center justify-between pt-2 border-t border-slate-800/80">
-            <span class="text-[11px] font-mono flex items-center gap-1.5" style="color:${char.vehicleColor}">
+            <span class="text-[11px] font-medium flex items-center gap-1.5" style="color:${char.vehicleColor}">
               <span class="w-2 h-2 rounded-full" style="background:${char.vehicleColor}"></span>
               ${char.vehicleName}
             </span>
             <span class="text-[11px] font-bold px-2.5 py-1 rounded-lg ${
               isActive ? 'bg-amber-400 text-slate-950' : 'bg-slate-800 text-slate-300'
             }">
-              ${isActive ? 'Simulating Route' : 'Dispatch Vehicle →'}
+              ${isActive ? 'Route Active' : 'Preview Commute →'}
             </span>
           </div>
         </div>
       `;
     }).join('');
+  }
+
+  function clearDispatchedRoute() {
+    if (vehicleAnimFrame) cancelAnimationFrame(vehicleAnimFrame);
+    if (vehicleLayer) vehicleLayer.clearLayers();
+    state.activeCharacterId = null;
+    renderCharacterCards();
+    const clearBtn = document.getElementById('clear-route-btn');
+    if (clearBtn) clearBtn.classList.add('hidden');
+    const logEl = document.getElementById('dispatch-telemetry-log');
+    if (logEl) {
+      logEl.innerHTML = 'Select a commuter profile below to preview how DalParkAid routes drivers around full campus lots.';
+    }
   }
 
   function dispatchCharacter(charId) {
@@ -491,26 +499,20 @@
     if (vehicleAnimFrame) cancelAnimationFrame(vehicleAnimFrame);
     vehicleLayer.clearLayers();
 
-    // Evaluate character's preferred lots using live engine
     const evaluated = char.preferredLots
       .map(id => window.DAL_LOTS.find(l => l.id === id))
       .filter(Boolean)
-      .map(lot => computeLotTelemetry(lot));
+      .map(lot => computeLotStatus(lot));
 
-    // Find if primary lot is crowded/full and pick best alternative
     const primary = evaluated[0];
-    const best = [...evaluated].sort((a, b) => b.finalScore - a.finalScore)[0];
-    const rerouted = best && primary && best.lot.id !== primary.lot.id && primary.finalScore < 55;
+    const best = [...evaluated].sort((a, b) => b.score - a.score)[0];
+    const rerouted = best && primary && best.lot.id !== primary.lot.id && primary.score < 55;
 
     const targetTelemetry = rerouted ? best : primary;
     if (!targetTelemetry) return;
 
-    state.selectedLotId = targetTelemetry.lot.id;
-    renderMapMarkers();
-    updateSelectedLotHUD();
-    syncLotPhysicsToSelected(targetTelemetry.lot);
+    selectLotById(targetTelemetry.lot.id, false);
 
-    // Build path from character startCoord -> primary lot (if rerouted, show bypass) -> destination lot
     const pathCoords = [
       char.startCoord,
       ...char.waypoints.slice(1, 3),
@@ -522,42 +524,41 @@
     }
 
     map.flyTo([targetTelemetry.lot.coordinate.latitude, targetTelemetry.lot.coordinate.longitude], 15, {
-      duration: 0.9
+      duration: 0.8
     });
 
-    // Draw dashed route polyline
-    routePolyline = L.polyline(pathCoords, {
+    L.polyline(pathCoords, {
       color: char.vehicleColor,
       weight: 4,
       dashArray: '8, 8',
       opacity: 0.9
     }).addTo(vehicleLayer);
 
-    // If rerouted, place a "LOT FULL / BYPASSED" beacon on primary lot
     if (rerouted) {
       const bypassIcon = L.divIcon({
         className: 'bypass-beacon',
         html: `<div class="px-2 py-0.5 rounded bg-rose-600 text-white font-mono text-[10px] font-bold shadow-lg whitespace-nowrap border border-rose-300">
-          BYPASSED ${primary.lot.name.toUpperCase()} (${primary.finalScore}% SCORE)
+          BYPASSED: ${primary.lot.name.toUpperCase()} (${primary.statusMeta.short.toUpperCase()})
         </div>`,
         iconSize: [160, 24],
         iconAnchor: [80, -18]
       });
-      rejectedMarker = L.marker(
+      L.marker(
         [primary.lot.coordinate.latitude, primary.lot.coordinate.longitude],
         { icon: bypassIcon }
       ).addTo(vehicleLayer);
     }
 
-    // Update Telemetry Log Banner
+    const clearBtn = document.getElementById('clear-route-btn');
+    if (clearBtn) clearBtn.classList.remove('hidden');
+
     const logEl = document.getElementById('dispatch-telemetry-log');
     if (logEl) {
       logEl.innerHTML = rerouted
-        ? `<span class="text-amber-400 font-bold">[REROUTE ACTIVE]</span> ${char.name}'s primary lot (<strong>${primary.lot.name}</strong>) scored ${primary.finalScore}/100. Intercepted pre-gate and routed to <strong>${targetTelemetry.lot.name}</strong> (${targetTelemetry.estOpenSpaces} open stalls, score ${targetTelemetry.finalScore}/100). Saved 14.2 mins circling.`
-        : `<span class="text-emerald-400 font-bold">[DIRECT ROUTE]</span> ${char.name} routed directly to <strong>${targetTelemetry.lot.name}</strong> (${targetTelemetry.estOpenSpaces} open stalls, score ${targetTelemetry.finalScore}/100). Zero gate delay.`;
+        ? `<span class="text-amber-400 font-bold">[Simulated Reroute]</span> ${char.name}'s first-choice lot (<strong>${primary.lot.name}</strong>) is ${primary.statusMeta.label.toLowerCase()}. DalParkAid redirects the trip to <strong>${targetTelemetry.lot.name}</strong> (~${targetTelemetry.estOpenSpaces} open spaces).`
+        : `<span class="text-emerald-400 font-bold">[Simulated Direct Arrival]</span> ${char.name}'s primary lot (<strong>${targetTelemetry.lot.name}</strong>) has good availability (~${targetTelemetry.estOpenSpaces} open spaces).`;
     }
 
-    // Animate top-down SVG vehicle along pathCoords
     animateVehicleAlongPath(pathCoords, char);
   }
 
@@ -597,7 +598,7 @@
         progress = 0;
         segmentIndex++;
         if (segmentIndex >= coords.length - 1) {
-          segmentIndex = 0; // continuous loop for visual telemetry
+          segmentIndex = 0;
         }
       }
 
@@ -614,7 +615,7 @@
   }
 
   // ============================================================================
-  // 3. TOP-DOWN PARKING LOT PHYSICS & STALL SIMULATOR CANVAS
+  // 3. TOP-DOWN PARKING LOT STALL SIMULATOR CANVAS
   // ============================================================================
   const lotSim = {
     canvas: null,
@@ -625,11 +626,9 @@
     stats: {
       parkedCount: 0,
       reroutedSavedCount: 0,
-      frustratedCirclingCount: 0,
-      minutesSaved: 0
+      frustratedCirclingCount: 0
     },
-    lotName: 'Dalplex Lot',
-    totalStalls: 24 // visual interactive stall grid (2 rows of 12 stalls)
+    lotName: 'Dalplex Lot'
   };
 
   function initLotPhysicsCanvas() {
@@ -638,7 +637,7 @@
     lotSim.canvas = canvas;
     lotSim.ctx = canvas.getContext('2d');
 
-    buildStallGrid(0.72);
+    buildStallGrid(0.65);
 
     canvas.addEventListener('click', (e) => {
       const rect = canvas.getBoundingClientRect();
@@ -647,7 +646,6 @@
       const x = (e.clientX - rect.left) * scaleX;
       const y = (e.clientY - rect.top) * scaleY;
 
-      // Check if user clicked a stall to toggle occupancy
       for (const stall of lotSim.stalls) {
         if (x >= stall.x && x <= stall.x + stall.w && y >= stall.y && y <= stall.y + stall.h) {
           stall.occupied = !stall.occupied;
@@ -657,16 +655,14 @@
         }
       }
 
-      // Otherwise spawn a commuter vehicle at entrance
       spawnLotVehicle();
     });
 
-    // Periodic ambient commuter arrival
     setInterval(() => {
-      if (lotSim.cars.length < 5) {
+      if (lotSim.cars.length < 4) {
         spawnLotVehicle();
       }
-    }, 2400);
+    }, 2600);
 
     requestAnimationFrame(renderLotPhysicsLoop);
   }
@@ -676,8 +672,9 @@
     return palette[Math.floor(Math.random() * palette.length)];
   }
 
-  function buildStallGrid(occupancyRatio = 0.7) {
+  function buildStallGrid(occupancyRatio = 0.65) {
     lotSim.stalls = [];
+    lotSim.cars = [];
     const cols = 12;
     const stallW = 48;
     const stallH = 74;
@@ -706,11 +703,19 @@
     updateLotSimStatsUI();
   }
 
+  function resetLotSim() {
+    lotSim.stats.parkedCount = 0;
+    lotSim.stats.reroutedSavedCount = 0;
+    lotSim.stats.frustratedCirclingCount = 0;
+    buildStallGrid(0.5);
+    showToast('Lot simulator reset to 50% occupancy');
+  }
+
   function syncLotPhysicsToSelected(lot) {
     if (!lot) return;
-    const t = computeLotTelemetry(lot);
+    const t = computeLotStatus(lot);
     lotSim.lotName = lot.name;
-    const occRatio = clamp((100 - t.finalScore) / 100, 0.1, 0.96);
+    const occRatio = clamp((100 - t.score) / 100, 0.1, 0.95);
     buildStallGrid(occRatio);
     const titleEl = document.getElementById('canvas-lot-title');
     if (titleEl) titleEl.textContent = `${lot.name} (${t.physicalCapacity} Total Stalls)`;
@@ -720,10 +725,8 @@
     const openStalls = lotSim.stalls.filter(s => !s.occupied && !s.reservedByCar);
     const color = pickRandomCarColor();
 
-    // If lot is full (or nearly full) and DalParkAid Smart Gate is ON, intercept at gate!
     if (openStalls.length === 0 && lotSim.smartGateEnabled) {
       lotSim.stats.reroutedSavedCount++;
-      lotSim.stats.minutesSaved = +(lotSim.stats.minutesSaved + 14.5).toFixed(1);
       lotSim.cars.push({
         x: 10,
         y: 145,
@@ -732,14 +735,13 @@
         color,
         state: 'INTERCEPTED_AT_GATE',
         targetStall: null,
-        label: 'REROUTED TO OPEN LOT (-14m)',
+        label: 'REROUTED TO OPEN LOT',
         alpha: 1
       });
       updateLotSimStatsUI();
       return;
     }
 
-    // Pick an available stall if one exists
     let targetStall = null;
     if (openStalls.length > 0) {
       targetStall = openStalls[Math.floor(Math.random() * openStalls.length)];
@@ -763,9 +765,8 @@
   }
 
   function triggerLectureRushWave() {
-    // Fill most stalls to simulate 9:25 AM crunch and spawn 6 incoming vehicles
     lotSim.stalls.forEach((s, idx) => {
-      if (idx % 9 !== 0) {
+      if (idx % 11 !== 0) {
         s.occupied = true;
         s.carColor = pickRandomCarColor();
       }
@@ -774,6 +775,7 @@
       setTimeout(() => spawnLotVehicle(), i * 320);
     }
     updateLotSimStatsUI();
+    showToast('Simulated 9:25 AM lecture rush wave triggered');
   }
 
   function toggleSmartGate() {
@@ -781,12 +783,13 @@
     const btn = document.getElementById('smart-gate-toggle-btn');
     if (btn) {
       btn.textContent = lotSim.smartGateEnabled
-        ? 'DalParkAid Pre-Gate Reroute: ACTIVE'
-        : 'DalParkAid Pre-Gate Reroute: OFF (Blind Commute)';
+        ? 'Pre-Trip Rerouting: ON'
+        : 'Pre-Trip Rerouting: OFF (Blind Arrival)';
       btn.className = lotSim.smartGateEnabled
         ? 'px-3.5 py-2 rounded-xl text-xs font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 transition'
         : 'px-3.5 py-2 rounded-xl text-xs font-mono font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40 transition';
     }
+    showToast(lotSim.smartGateEnabled ? 'Pre-trip rerouting enabled' : 'Pre-trip rerouting disabled (cars will enter full lot)');
   }
 
   function updateLotSimStatsUI() {
@@ -798,7 +801,6 @@
     setTxt('sim-open-stalls', `${openCount} / ${lotSim.stalls.length}`);
     setTxt('sim-rerouted-count', lotSim.stats.reroutedSavedCount);
     setTxt('sim-circling-count', lotSim.stats.frustratedCirclingCount);
-    setTxt('sim-minutes-saved', `${lotSim.stats.minutesSaved} min`);
   }
 
   function drawTopDownCar(ctx, x, y, w, h, color, isHorizontal = false, isFrustrated = false) {
@@ -807,18 +809,15 @@
     ctx.strokeStyle = isFrustrated ? '#EF4444' : '#0B1424';
     ctx.lineWidth = 2;
 
-    // Car body
     ctx.beginPath();
     ctx.roundRect(x, y, w, h, 6);
     ctx.fill();
     ctx.stroke();
 
-    // Windshield
     ctx.fillStyle = '#0F172A';
     if (isHorizontal) {
       ctx.fillRect(x + w * 0.55, y + 4, w * 0.24, h - 8);
       ctx.fillRect(x + w * 0.15, y + 5, w * 0.18, h - 10);
-      // Headlight beams
       ctx.fillStyle = 'rgba(254, 240, 138, 0.35)';
       ctx.beginPath();
       ctx.moveTo(x + w, y + 4);
@@ -839,11 +838,9 @@
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Asphalt background
     ctx.fillStyle = '#0B1322';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Entrance Gate Sensor Zone
     ctx.fillStyle = lotSim.smartGateEnabled ? 'rgba(34, 197, 94, 0.10)' : 'rgba(239, 68, 68, 0.08)';
     ctx.fillRect(0, 108, 96, 104);
     ctx.strokeStyle = lotSim.smartGateEnabled ? '#22C55E' : '#EF4444';
@@ -853,10 +850,9 @@
 
     ctx.fillStyle = lotSim.smartGateEnabled ? '#22C55E' : '#F87171';
     ctx.font = 'bold 9px JetBrains Mono, monospace';
-    ctx.fillText(lotSim.smartGateEnabled ? 'DALPARKAID' : 'NO SENSOR', 14, 130);
-    ctx.fillText(lotSim.smartGateEnabled ? 'GATE BEACON' : 'BLIND ENTRY', 14, 142);
+    ctx.fillText(lotSim.smartGateEnabled ? 'DALPARKAID' : 'NO APP CHECK', 12, 130);
+    ctx.fillText(lotSim.smartGateEnabled ? 'ROUTE CHECK' : 'BLIND ENTRY', 12, 142);
 
-    // Central driving lane markings
     ctx.strokeStyle = 'rgba(242, 201, 76, 0.35)';
     ctx.lineWidth = 2;
     ctx.setLineDash([14, 12]);
@@ -866,7 +862,6 @@
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Draw Stalls
     for (const stall of lotSim.stalls) {
       ctx.strokeStyle = stall.type === 'RESERVED'
         ? 'rgba(56, 189, 248, 0.5)'
@@ -876,7 +871,6 @@
       ctx.lineWidth = 1.5;
       ctx.strokeRect(stall.x, stall.y, stall.w, stall.h);
 
-      // Stall number & tier tag
       ctx.fillStyle = 'rgba(148, 163, 184, 0.45)';
       ctx.font = '9px JetBrains Mono, monospace';
       ctx.fillText(`#${stall.id + 1}`, stall.x + 6, stall.y + 14);
@@ -884,7 +878,6 @@
       if (stall.occupied) {
         drawTopDownCar(ctx, stall.x + 8, stall.y + 8, stall.w - 16, stall.h - 16, stall.carColor || '#F2C94C', false, false);
       } else {
-        // Open stall indicator dot
         ctx.fillStyle = '#22C55E';
         ctx.beginPath();
         ctx.arc(stall.x + stall.w / 2, stall.y + stall.h / 2 + 6, 3.5, 0, Math.PI * 2);
@@ -892,13 +885,12 @@
       }
     }
 
-    // Update & Draw Active Moving Cars
     for (let i = lotSim.cars.length - 1; i >= 0; i--) {
       const car = lotSim.cars[i];
 
       if (car.state === 'INTERCEPTED_AT_GATE') {
         car.x += car.vx * 0.5;
-        car.y -= 2.1; // U-turn / reroute upward before entering congested lane
+        car.y -= 2.1;
         car.alpha -= 0.018;
         drawTopDownCar(ctx, car.x, car.y, 40, 22, car.color, true, false);
 
@@ -921,7 +913,6 @@
           ctx.font = 'bold 9px JetBrains Mono, monospace';
           ctx.fillText(car.label, car.x, car.y - 16);
         } else {
-          // Pull into stall
           car.targetStall.occupied = true;
           car.targetStall.reservedByCar = false;
           car.targetStall.carColor = car.color;
@@ -949,7 +940,7 @@
   }
 
   // ============================================================================
-  // 4. OPEN-METEO LIVE HALIFAX WEATHER + ENGINE CONTROLS
+  // 4. OPEN-METEO LIVE HALIFAX WEATHER & COMMUNITY CHECK-INS
   // ============================================================================
   async function fetchLiveHalifaxWeather() {
     try {
@@ -965,10 +956,8 @@
         if ([95, 96, 99].includes(code)) state.weatherType = 'STORM';
         else if ([71, 73, 75, 77, 85, 86].includes(code)) state.weatherType = 'SNOW';
         else if ([51, 53, 55, 61, 63, 65, 80, 81, 82].includes(code)) state.weatherType = 'RAIN';
-        else if ([45, 48].includes(code)) state.weatherType = 'FOG';
         else state.weatherType = 'CLEAR';
 
-        state.liveWeatherLoaded = true;
         updateWeatherUI();
         refreshAllViews();
       }
@@ -980,12 +969,12 @@
   function updateWeatherUI() {
     const tempEl = document.getElementById('live-halifax-temp');
     const windEl = document.getElementById('live-halifax-wind');
-    if (tempEl) tempEl.textContent = `${state.weatherTempC}°C in Halifax`;
-    if (windEl) windEl.textContent = `Wind ${state.weatherWindKmh} km/h`;
+    if (tempEl) tempEl.textContent = `Halifax: ${state.weatherTempC}°C`;
+    if (windEl) windEl.textContent = `Wind: ${state.weatherWindKmh} km/h`;
 
     document.querySelectorAll('.weather-btn').forEach(btn => {
       const active = btn.dataset.weather === state.weatherType;
-      btn.className = `weather-btn px-3 py-1.5 rounded-lg text-xs font-mono font-semibold border transition ${
+      btn.className = `weather-btn px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${
         active
           ? 'bg-amber-400 text-slate-950 border-amber-400 font-bold'
           : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
@@ -994,43 +983,56 @@
   }
 
   function injectCrowdReport(rating) {
-    const hasProof = document.getElementById('crowd-proof-checkbox')?.checked ?? true;
     const lotId = state.selectedLotId;
     if (!state.injectedReports[lotId]) {
       state.injectedReports[lotId] = [];
     }
     state.injectedReports[lotId].unshift({
       rating: Number(rating),
-      ageMins: 1,
-      hasProof,
-      voteMultiplier: 1.45
+      ageMins: 1
     });
+    state.lastReportHistory.push(lotId);
 
-    const feedback = document.getElementById('crowd-inject-feedback');
-    if (feedback) {
-      feedback.textContent = `Injected rating ${rating}/5 (${hasProof ? 'with photo proof 1.15x' : 'text only'}) into ${lotId}. Alpha recalculated.`;
-      feedback.classList.remove('hidden');
-    }
+    const undoBtn = document.getElementById('undo-report-btn');
+    if (undoBtn) undoBtn.classList.remove('hidden');
 
+    const labels = { 1: 'Full', 2: 'Busy', 3: 'Moderate', 4: 'Open', 5: 'Empty' };
+    showToast(`Logged "${labels[rating]}" check-in for selected lot`);
     refreshAllViews();
   }
 
+  // Heuristic #3: User control and freedom (Undo last crowd check-in)
+  function undoLastReport() {
+    const lastLotId = state.lastReportHistory.pop();
+    if (lastLotId && state.injectedReports[lastLotId] && state.injectedReports[lastLotId].length > 0) {
+      state.injectedReports[lastLotId].shift();
+      showToast('Undid last community check-in');
+      refreshAllViews();
+    }
+    if (state.lastReportHistory.length === 0) {
+      const undoBtn = document.getElementById('undo-report-btn');
+      if (undoBtn) undoBtn.classList.add('hidden');
+    }
+  }
+
   // ============================================================================
-  // 5. COMMUTER ECONOMICS & WASTE CALCULATOR (CAMPUS2MARKET VALIDATION)
+  // 5. ILLUSTRATIVE COMMUTER SCENARIO CALCULATOR (WITH VERIFIED HRM $45 FINE)
   // ============================================================================
   function updateCommuterCalculator() {
     const daysPerWeek = Number(document.getElementById('calc-days')?.value || 4);
     const arrivalHour = Number(document.getElementById('calc-hour')?.value || 10);
-    const ticketRisk = Number(document.getElementById('calc-tickets')?.value || 2);
+    const ticketCount = Number(document.getElementById('calc-tickets')?.value || 1);
 
-    const peakMultiplier = (arrivalHour >= 9 && arrivalHour <= 13) ? 1.35 : (arrivalHour >= 14 && arrivalHour <= 16) ? 1.0 : 0.45;
-    const minsPerTrip = Math.round(14 * peakMultiplier);
-    const weeksPerAcademicYear = 32;
+    const peakMultiplier = (arrivalHour >= 9 && arrivalHour <= 13) ? 1.25 : (arrivalHour >= 14 && arrivalHour <= 16) ? 0.9 : 0.4;
+    const minsPerTrip = Math.round(12 * peakMultiplier);
+    const weeksPerAcademicYear = 32; // Two 16-week terms (Fall + Winter)
     const totalTrips = daysPerWeek * weeksPerAcademicYear;
 
-    const hoursLost = Math.round((totalTrips * minsPerTrip) / 60);
-    const fuelAndTicketWaste = Math.round((hoursLost * 6.8) + (ticketRisk * 55));
-    const co2Kg = Math.round(hoursLost * 4.2);
+    const hoursSearching = Math.round((totalTrips * minsPerTrip) / 60);
+    // Official HRM municipal parking violation fine is $45 ($40 if paid within 7 days)
+    const hrmTicketFine = 45;
+    const estFuelAndFines = Math.round((hoursSearching * 5.5) + (ticketCount * hrmTicketFine));
+    const estCo2Kg = Math.round(hoursSearching * 3.8);
 
     const setTxt = (id, v) => {
       const el = document.getElementById(id);
@@ -1038,10 +1040,10 @@
     };
     setTxt('calc-days-val', `${daysPerWeek} days/wk`);
     setTxt('calc-hour-val', `${arrivalHour}:00`);
-    setTxt('calc-tickets-val', `${ticketRisk} tickets/yr`);
-    setTxt('calc-hours-lost', `${hoursLost} hrs`);
-    setTxt('calc-money-lost', `$${fuelAndTicketWaste}`);
-    setTxt('calc-co2-lost', `${co2Kg} kg`);
+    setTxt('calc-tickets-val', `${ticketCount} ticket${ticketCount === 1 ? '' : 's'}/yr`);
+    setTxt('calc-hours-lost', `~${hoursSearching} hrs`);
+    setTxt('calc-money-lost', `~$${estFuelAndFines}`);
+    setTxt('calc-co2-lost', `~${estCo2Kg} kg`);
   }
 
   function refreshAllViews() {
@@ -1049,16 +1051,42 @@
       : state.hour === 12 ? '12:00 PM'
       : state.hour > 12 ? `${state.hour - 12}:00 PM` : `${state.hour}:00 AM`;
 
+    const ruleNote = isOvernightBanHour(state.hour)
+      ? 'Overnight Ban Window (1:30 AM to 6:00 AM)'
+      : isEveningHour(state.hour)
+        ? 'Evening Period (After 4:30 PM: Reserved Stalls Open to Permits)'
+        : 'Daytime Permit Period (6:00 AM to 4:30 PM)';
+
     const timeDisplay = document.getElementById('scrubber-time-display');
     if (timeDisplay) {
-      timeDisplay.textContent = `${hourLabel} (${isEveningHour(state.hour) ? 'Evening Rules: Reserved Stalls Unlocked' : 'Daytime Permit Rules Active'})`;
+      timeDisplay.textContent = `${hourLabel} • ${ruleNote}`;
     }
 
     renderMapMarkers();
     updateSelectedLotHUD();
   }
 
-  // Expose interactive API to DOM controls
+  function resetAllFilters() {
+    state.hour = 10;
+    state.weatherType = 'CLEAR';
+    state.academicDayType = 'TEACHING_DAY';
+    state.campusFilter = 'all';
+    state.permitFilter = 'GENERAL';
+    clearDispatchedRoute();
+
+    const slider = document.getElementById('hour-scrubber');
+    if (slider) slider.value = 10;
+    const calSel = document.getElementById('academic-day-select');
+    if (calSel) calSel.value = 'TEACHING_DAY';
+    const permSel = document.getElementById('permit-filter-select');
+    if (permSel) permSel.value = 'GENERAL';
+
+    window.DalSim.setCampusFilter('all');
+    updateWeatherUI();
+    refreshAllViews();
+    showToast('Reset map filters to default daytime view');
+  }
+
   window.DalSim = {
     setHour(h) {
       state.hour = Number(h);
@@ -1075,12 +1103,17 @@
       state.academicDayType = dayType;
       refreshAllViews();
     },
+    setPermitFilter(permit) {
+      state.permitFilter = permit;
+      refreshAllViews();
+      showToast(`Filtered compatibility for ${permit.replace('_', ' ').toLowerCase()} permits`);
+    },
     setCampusFilter(campus) {
       state.campusFilter = campus;
       document.querySelectorAll('.campus-filter-btn').forEach(btn => {
         const active = btn.dataset.campus === campus;
-        btn.className = `campus-filter-btn px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold transition ${
-          active ? 'bg-amber-400 text-slate-950' : 'bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-700'
+        btn.className = `campus-filter-btn px-3.5 py-1.5 rounded-xl text-xs font-semibold transition ${
+          active ? 'bg-amber-400 text-slate-950 font-bold' : 'bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-700'
         }`;
       });
       if (map) {
@@ -1091,9 +1124,11 @@
       }
       refreshAllViews();
     },
+    selectLotById,
     setMapTileStyle,
     locateUserNearestLot() {
       if (!navigator.geolocation) {
+        showToast('Geolocation is not supported by this browser');
         return;
       }
       navigator.geolocation.getCurrentPosition(
@@ -1106,19 +1141,25 @@
               color: '#38BDF8',
               fillColor: '#38BDF8',
               fillOpacity: 0.9
-            }).addTo(map).bindPopup("You are here").openPopup();
+            }).addTo(map).bindPopup('Your Location').openPopup();
           }
+          showToast('Centered map on your GPS coordinates');
         },
         () => {
           if (map) map.flyTo([44.6378, -63.5885], 16);
+          showToast('Location permission declined; centered on Studley Campus');
         }
       );
     },
     dispatchCharacter,
+    clearDispatchedRoute,
     injectCrowdReport,
+    undoLastReport,
     triggerLectureRushWave,
     toggleSmartGate,
     spawnLotVehicle,
+    resetLotSim,
+    resetAllFilters,
     updateCommuterCalculator
   };
 
@@ -1128,6 +1169,5 @@
     updateWeatherUI();
     updateCommuterCalculator();
     fetchLiveHalifaxWeather();
-    setTimeout(() => dispatchCharacter('maya'), 600);
   });
 })();
