@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#111C33" />
+      <stop offset="100%" stop-color="#070C16" />
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#FFE066" />
+      <stop offset="100%" stop-color="#F2C94C" />
+    </linearGradient>
+  </defs>
+
+  <!-- Outer Rounded Badge -->
+  <rect x="4" y="4" width="112" height="112" rx="24" fill="url(#bgGrad)" stroke="#F2C94C" stroke-width="3" />
+
+  <!-- Subtle Parking Stall Corner Brackets -->
+  <path d="M 16 26 L 16 16 L 26 16" fill="none" stroke="#F2C94C" stroke-width="2.2" stroke-linecap="round" opacity="0.65" />
+  <path d="M 94 16 L 104 16 L 104 26" fill="none" stroke="#F2C94C" stroke-width="2.2" stroke-linecap="round" opacity="0.65" />
+  <path d="M 16 94 L 16 104 L 26 104" fill="none" stroke="#F2C94C" stroke-width="2.2" stroke-linecap="round" opacity="0.65" />
+  <path d="M 94 104 L 104 104 L 104 94" fill="none" stroke="#F2C94C" stroke-width="2.2" stroke-linecap="round" opacity="0.65" />
+
+  <!-- ROW 1: DAL -->
+  <text x="60" y="41"
+        text-anchor="middle"
+        font-family="'Space Grotesk', 'Inter', system-ui, sans-serif"
+        font-weight="800"
+        font-size="28"
+        letter-spacing="5"
+        fill="#F8FAFC">DAL</text>
+
+  <!-- Gold Road / Stall Divider Line 1 -->
+  <line x1="22" y1="47" x2="98" y2="47" stroke="#F2C94C" stroke-width="1.5" stroke-dasharray="6 4" opacity="0.5" />
+
+  <!-- ROW 2: PRK (Stylized 3-letter middle row in Dalhousie Gold) -->
+  <text x="60" y="71"
+        text-anchor="middle"
+        font-family="'Space Grotesk', 'Inter', system-ui, sans-serif"
+        font-weight="800"
+        font-size="28"
+        letter-spacing="5"
+        fill="url(#goldGrad)">PRK</text>
+
+  <!-- Gold Road / Stall Divider Line 2 -->
+  <line x1="22" y1="77" x2="98" y2="77" stroke="#F2C94C" stroke-width="1.5" stroke-dasharray="6 4" opacity="0.5" />
+
+  <!-- ROW 3: AID -->
+  <text x="60" y="101"
+        text-anchor="middle"
+        font-family="'Space Grotesk', 'Inter', system-ui, sans-serif"
+        font-weight="800"
+        font-size="28"
+        letter-spacing="7"
+        fill="#F8FAFC">AID</text>
+
+  <!-- Glowing Live Availability Dot on top right -->
+  <circle cx="96" cy="24" r="4.5" fill="#22C55E" />
+</svg>
