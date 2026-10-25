@@ -220,11 +220,6 @@
   let currentTileLayer = null;
 
   const tileProviders = {
-    dark: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      maxZoom: 19,
-      subdomains: 'abcd',
-      attribution: 'CartoDB'
-    }),
     googleHybrid: L.tileLayer('https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
       maxZoom: 20,
       subdomains: ['0', '1', '2', '3'],
@@ -268,13 +263,10 @@
     if (badge) {
       if (styleKey.startsWith('google')) {
         badge.textContent = 'GOOGLE MAPS SDK ENGINE';
-        badge.className = 'px-2 py-0.5 rounded bg-sky-500/15 text-sky-400 border border-sky-500/30 text-[9px] font-mono font-bold';
-      } else if (styleKey === 'osm') {
-        badge.textContent = 'OPENSTREETMAP FALLBACK ENGINE';
-        badge.className = 'px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-[9px] font-mono font-bold';
+        badge.className = 'hidden sm:inline-block px-2 py-0.5 rounded bg-sky-500/15 text-sky-400 border border-sky-500/30 text-[9px] font-mono font-bold mr-1';
       } else {
-        badge.textContent = 'DARK VECTOR TELEMETRY';
-        badge.className = 'px-2 py-0.5 rounded bg-dalGold/15 text-dalGold border border-dalGold/30 text-[9px] font-mono font-bold';
+        badge.textContent = 'OPENSTREETMAP FALLBACK ENGINE';
+        badge.className = 'hidden sm:inline-block px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-[9px] font-mono font-bold mr-1';
       }
     }
 
@@ -299,8 +291,8 @@
 
     L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-    // Default to sleek dark CartoDB tile layer
-    currentTileLayer = tileProviders.dark;
+    // Default to Google Streets tile layer with automatic OSM fallback
+    currentTileLayer = tileProviders.googleRoads;
     currentTileLayer.addTo(map);
 
     markersLayer = L.layerGroup().addTo(map);

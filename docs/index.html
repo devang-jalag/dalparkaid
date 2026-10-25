@@ -393,41 +393,37 @@
       <div class="grid lg:grid-cols-12 gap-6">
         <!-- Map Column -->
         <div class="lg:col-span-8 flex flex-col gap-4">
-          <div class="relative rounded-3xl overflow-hidden border border-slate-700/90 shadow-2xl h-[480px]">
-            <div id="halifax-map" class="w-full h-full"></div>
-
-            <!-- Floating Map Legend & Tile Switcher -->
-            <div class="absolute top-4 left-4 z-[400] bg-slate-950/90 backdrop-blur-md border border-slate-800 rounded-xl px-3.5 py-2.5 text-[11px] font-mono space-y-1.5 shadow-xl">
-              <div class="text-slate-400 font-bold uppercase text-[10px]">STALL AVAILABILITY SCORE</div>
-              <div class="flex items-center gap-3">
+          <div class="rounded-3xl overflow-hidden border border-slate-700/90 shadow-2xl bg-slate-950 flex flex-col">
+            <!-- Dedicated Non-Overlapping Map Header Bar: Score Legend + Map Engine Switcher -->
+            <div class="px-4 py-2.5 bg-slate-950 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 text-[11px] font-mono">
+              <div class="flex flex-wrap items-center gap-3">
+                <span class="text-slate-400 font-bold uppercase text-[10px]">SCORE:</span>
                 <span class="flex items-center gap-1 text-emerald-400"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>80+ Empty</span>
                 <span class="flex items-center gap-1 text-lime-400"><span class="w-2.5 h-2.5 rounded-full bg-lime-500"></span>58+ Normal</span>
                 <span class="flex items-center gap-1 text-amber-400"><span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span>36+ Crowded</span>
                 <span class="flex items-center gap-1 text-rose-400"><span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span>&lt;36 Full</span>
               </div>
+
+              <div class="flex flex-wrap items-center gap-1.5">
+                <span id="map-engine-badge" class="hidden xl:inline-block px-2 py-0.5 rounded bg-sky-500/15 text-sky-400 border border-sky-500/30 text-[9px] font-mono font-bold mr-1">
+                  GOOGLE MAPS SDK ENGINE
+                </span>
+                <button onclick="window.DalSim.setMapTileStyle('googleRoads')" data-style="googleRoads" class="map-style-btn px-2.5 py-1 rounded-md text-[10px] font-mono font-bold bg-amber-400 text-slate-950 transition">
+                  Google Streets
+                </button>
+                <button onclick="window.DalSim.setMapTileStyle('googleHybrid')" data-style="googleHybrid" class="map-style-btn px-2.5 py-1 rounded-md text-[10px] font-mono font-bold bg-slate-900 text-slate-300 hover:bg-slate-800 transition">
+                  Google Satellite
+                </button>
+                <button onclick="window.DalSim.setMapTileStyle('osm')" data-style="osm" class="map-style-btn px-2.5 py-1 rounded-md text-[10px] font-mono font-bold bg-slate-900 text-slate-300 hover:bg-slate-800 transition">
+                  OpenStreetMap
+                </button>
+                <button onclick="window.DalSim.locateUserNearestLot()" title="Locate with Browser GPS" class="px-2 py-1 rounded-md text-[10px] font-mono font-bold bg-sky-500/20 text-sky-300 hover:bg-sky-500/30 border border-sky-500/40 transition">
+                  GPS
+                </button>
+              </div>
             </div>
 
-            <!-- Map Engine Switcher: Google Maps SDK with OpenStreetMap Fallback -->
-            <div class="absolute top-4 right-4 z-[400] bg-slate-950/90 backdrop-blur-md border border-slate-800 rounded-xl p-1.5 flex flex-wrap items-center gap-1 shadow-xl">
-              <span id="map-engine-badge" class="hidden sm:inline-block px-2 py-0.5 rounded bg-dalGold/15 text-dalGold border border-dalGold/30 text-[9px] font-mono font-bold mr-1">
-                DARK VECTOR TELEMETRY
-              </span>
-              <button onclick="window.DalSim.setMapTileStyle('googleHybrid')" data-style="googleHybrid" class="map-style-btn px-2.5 py-1 rounded-md text-[10px] font-mono font-bold bg-slate-900 text-slate-300 hover:bg-slate-800 transition">
-                Google Satellite
-              </button>
-              <button onclick="window.DalSim.setMapTileStyle('googleRoads')" data-style="googleRoads" class="map-style-btn px-2.5 py-1 rounded-md text-[10px] font-mono font-bold bg-slate-900 text-slate-300 hover:bg-slate-800 transition">
-                Google Streets
-              </button>
-              <button onclick="window.DalSim.setMapTileStyle('dark')" data-style="dark" class="map-style-btn px-2.5 py-1 rounded-md text-[10px] font-mono font-bold bg-amber-400 text-slate-950 transition">
-                Dark Mode
-              </button>
-              <button onclick="window.DalSim.setMapTileStyle('osm')" data-style="osm" class="map-style-btn px-2.5 py-1 rounded-md text-[10px] font-mono font-bold bg-slate-900 text-slate-300 hover:bg-slate-800 transition">
-                OpenStreetMap
-              </button>
-              <button onclick="window.DalSim.locateUserNearestLot()" title="Locate with Browser GPS" class="px-2 py-1 rounded-md text-[10px] font-mono font-bold bg-sky-500/20 text-sky-300 hover:bg-sky-500/30 border border-sky-500/40 transition">
-                GPS
-              </button>
-            </div>
+            <div id="halifax-map" class="w-full h-[460px]"></div>
           </div>
 
           <!-- Live Dispatch Telemetry Output Banner -->
@@ -879,12 +875,36 @@
           Validation recorded in cohort log! Thank you for backing DalParkAid's Campus2Market Validate application.
         </div>
       </form>
+
+      <!-- Direct Venture & Founder Contact Bar -->
+      <div id="contact" class="mt-8 pt-6 border-t border-slate-800">
+        <div class="text-xs font-mono uppercase text-dalGold font-bold mb-3">
+          DIRECT VENTURE &amp; FOUNDER CONTACT (CAMPUS2MARKET VALIDATE INQUIRIES)
+        </div>
+        <div class="grid sm:grid-cols-3 gap-3 font-mono text-xs">
+          <a href="mailto:dalparkaid@gmail.com?subject=DalParkAid%20Campus2Market%20Inquiry"
+             class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-dalGold transition flex flex-col justify-between group">
+            <span class="text-[10px] text-slate-400 uppercase">Venture Desk</span>
+            <span class="text-white font-bold group-hover:text-dalGold transition truncate mt-1">dalparkaid@gmail.com</span>
+          </a>
+          <a href="mailto:devangjalag@gmail.com?subject=DalParkAid%20Venture%20Inquiry"
+             class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-dalGold transition flex flex-col justify-between group">
+            <span class="text-[10px] text-slate-400 uppercase">Founder Direct</span>
+            <span class="text-white font-bold group-hover:text-dalGold transition truncate mt-1">devangjalag@gmail.com</span>
+          </a>
+          <a href="mailto:zj799583@dal.ca?subject=DalParkAid%20Dalhousie%20Pilot"
+             class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-dalGold transition flex flex-col justify-between group">
+            <span class="text-[10px] text-slate-400 uppercase">Dalhousie Academic</span>
+            <span class="text-white font-bold group-hover:text-dalGold transition truncate mt-1">zj799583@dal.ca</span>
+          </a>
+        </div>
+      </div>
     </div>
   </section>
 
   <!-- Footer -->
   <footer class="py-10 px-6 border-t border-slate-800/80 bg-slate-950 text-xs text-slate-400">
-    <div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+    <div class="max-w-7xl mx-auto flex flex-col lg:flex-row items-center justify-between gap-4">
       <div class="flex items-center gap-3">
         <div class="w-8 h-8 rounded-xl overflow-hidden bg-slate-900 border border-dalGold/50 p-0.5 flex items-center justify-center">
           <img src="./assets/dalparkaid-logo.svg" alt="DalParkAid" class="w-full h-full object-contain rounded-lg" />
@@ -894,8 +914,12 @@
         <span class="text-slate-600">|</span>
         <span>Geospatial Parking Intelligence • Halifax, Nova Scotia</span>
       </div>
-      <div class="font-mono text-[11px] text-slate-500">
-        Built with Expo SDK 54, React Native, Firebase & Open-Meteo • Campus2Market Validate 2026
+      <div class="flex flex-wrap items-center justify-center gap-4 font-mono text-[11px] text-slate-400">
+        <a href="mailto:dalparkaid@gmail.com" class="hover:text-dalGold transition">dalparkaid@gmail.com</a>
+        <span class="text-slate-700">•</span>
+        <a href="mailto:devangjalag@gmail.com" class="hover:text-dalGold transition">devangjalag@gmail.com</a>
+        <span class="text-slate-700">•</span>
+        <a href="mailto:zj799583@dal.ca" class="hover:text-dalGold transition">zj799583@dal.ca</a>
       </div>
     </div>
   </footer>
