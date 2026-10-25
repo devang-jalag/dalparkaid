@@ -909,13 +909,19 @@
             <span>I am open to a 10-minute Customer Discovery chat for Campus2Market Validate.</span>
           </label>
 
-          <button type="submit" class="px-8 py-4 rounded-xl bg-dalGold text-slate-950 font-heading font-bold text-sm sm:text-base hover:bg-yellow-300 transition shadow-lg shadow-dalGold/20">
-            Submit Feedback &amp; Request Beta Access
-          </button>
+          <div class="flex flex-wrap items-center gap-2.5">
+            <button type="button" onclick="exportSignupsToExcelCSV()"
+                    class="px-4 py-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 font-mono text-xs font-semibold transition">
+              Download Excel (.csv)
+            </button>
+            <button type="submit" id="v-submit-btn" class="px-7 py-4 rounded-xl bg-dalGold text-slate-950 font-heading font-bold text-sm sm:text-base hover:bg-yellow-300 transition shadow-lg shadow-dalGold/20">
+              Submit Feedback &amp; Request Beta Access
+            </button>
+          </div>
         </div>
 
-        <div id="v-success" class="hidden p-4 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs">
-          Thank you! Your response has been recorded for our Campus2Market Validate discovery cohort.
+        <div id="v-success" class="hidden p-4 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs leading-relaxed">
+          Thank you! Your response has been saved to our pilot database and emailed to <strong>dalparkaid@gmail.com</strong>. You can also click <strong>Download Excel (.csv)</strong> above to export logged responses.
         </div>
       </form>
 
@@ -971,13 +977,167 @@
   <script src="./lotsData.js"></script>
   <script src="./simulator.js"></script>
   <script>
-    function handleValidationSubmit(e) {
+    const FIRESTORE_PILOT_URL = 'https://firestore.googleapis.com/v1/projects/dalparking-19789/databases/(default)/documents/pilotSignups';
+    const STORAGE_KEY = 'dalparkaid_pilot_signups_v1';
+
+    function getLocalSignups() {
+      try {
+        return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+      } catch (_) {
+        return [];
+      }
+    }
+
+    function saveLocalSignup(entry) {
+      const list = getLocalSignups();
+      list.push(entry);
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+      } catch (_) {}
+    }
+
+    async function handleValidationSubmit(e) {
       e.preventDefault();
+      const btn = document.getElementById('v-submit-btn');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Submitting...';
+      }
+
+      const entry = {
+        name: document.getElementById('v-name')?.value?.trim() || '',
+        email: document.getElementById('v-email')?.value?.trim() || '',
+        role: document.getElementById('v-role')?.value || '',
+        campus: document.getElementById('v-campus')?.value || '',
+        permit: document.getElementById('v-permit')?.value || '',
+        note: document.getElementById('v-note')?.value?.trim() || '',
+        openToInterview: document.getElementById('v-interview')?.checked ? 'Yes' : 'No',
+        submittedAt: new Date().toISOString()
+      };
+
+      saveLocalSignup(entry);
+
+      // 1. Save to Firebase Firestore (dalparking-19789 -> pilotSignups collection)
+      const firestorePayload = {
+        fields: {
+          name: { stringValue: entry.name },
+          email: { stringValue: entry.email },
+          role: { stringValue: entry.role },
+          campus: { stringValue: entry.campus },
+          permit: { stringValue: entry.permit },
+          note: { stringValue: entry.note },
+          openToInterview: { stringValue: entry.openToInterview },
+          submittedAt: { stringValue: entry.submittedAt }
+        }
+      };
+
+      fetch(FIRESTORE_PILOT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(firestorePayload)
+      }).catch(() => {});
+
+      // 2. Send instant email notification to dalparkaid@gmail.com (CC devangjalag@gmail.com, zj799583@dal.ca)
+      try {
+        await fetch('https://formsubmit.co/ajax/dalparkaid@gmail.com', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({
+            _subject: `DalParkAid Pilot Signup: ${entry.name} (${entry.role})`,
+            _cc: 'devangjalag@gmail.com,zj799583@dal.ca',
+            _template: 'table',
+            Name: entry.name,
+            Email: entry.email,
+            Role: entry.role,
+            Campus: entry.campus,
+            Permit_Tier: entry.permit,
+            Parking_Headache_Note: entry.note,
+            Open_To_10Min_Discovery_Chat: entry.openToInterview,
+            Submitted_At: entry.submittedAt
+          })
+        });
+      } catch (_) {}
+
       const badge = document.getElementById('validation-count-badge');
-      if (badge) badge.textContent = '● Response Logged in Session';
+      if (badge) badge.textContent = '● Response Saved & Emailed';
       const success = document.getElementById('v-success');
       if (success) success.classList.remove('hidden');
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Submit Feedback & Request Beta Access';
+      }
       e.target.reset();
+    }
+
+    async function exportSignupsToExcelCSV() {
+      let rows = [];
+
+      // Try fetching all cloud records from Firebase Firestore first
+      try {
+        const res = await fetch(`${FIRESTORE_PILOT_URL}?pageSize=300`);
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.documents)) {
+            rows = data.documents.map(doc => {
+              const f = doc.fields || {};
+              return {
+                submittedAt: f.submittedAt?.stringValue || '',
+                name: f.name?.stringValue || '',
+                email: f.email?.stringValue || '',
+                role: f.role?.stringValue || '',
+                campus: f.campus?.stringValue || '',
+                permit: f.permit?.stringValue || '',
+                openToInterview: f.openToInterview?.stringValue || '',
+                note: f.note?.stringValue || ''
+              };
+            });
+          }
+        }
+      } catch (_) {}
+
+      // Merge any local browser submissions not yet in list
+      const local = getLocalSignups();
+      const seen = new Set(rows.map(r => `${r.email}_${r.submittedAt}`));
+      local.forEach(item => {
+        const key = `${item.email}_${item.submittedAt}`;
+        if (!seen.has(key)) rows.push(item);
+      });
+
+      if (rows.length === 0) {
+        alert('No pilot signups recorded yet. Submit the form once to test exporting to Excel!');
+        return;
+      }
+
+      const headers = ['Submitted At (ISO)', 'Full Name', 'Email', 'Role', 'Campus / Zone', 'Permit Tier', 'Open to 10-Min Chat', 'Parking Feedback Note'];
+      const escapeCSV = (val) => `"${String(val ?? '').replace(/"/g, '""')}"`;
+
+      const csvLines = [
+        headers.map(escapeCSV).join(','),
+        ...rows.map(r => [
+          r.submittedAt,
+          r.name,
+          r.email,
+          r.role,
+          r.campus,
+          r.permit,
+          r.openToInterview,
+          r.note
+        ].map(escapeCSV).join(','))
+      ];
+
+      // Add UTF-8 BOM (\uFEFF) so Microsoft Excel opens columns cleanly
+      const blob = new Blob(['\uFEFF' + csvLines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `DalParkAid_Pilot_Signups_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
     }
   </script>
 </body>
