@@ -3,12 +3,23 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const PROJECT_ID = 'dalparking-19789';
 const COLLECTION = 'pilotSignups';
 const ENDPOINT = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/${COLLECTION}?pageSize=500`;
 
-async function exportToExcelCSV() {
+// Security Fix V2: Neutralize CSV/Excel formula injection (=, +, -, @, \t, \r)
+export function sanitizeCSVCell(val) {
+  let str = String(val ?? '');
+  const trimmed = str.trimStart();
+  if (/^[=+\-@\t\r]/.test(trimmed)) {
+    str = `'${str}`;
+  }
+  return `"${str.replace(/"/g, '""')}"`;
+}
+
+export async function exportToExcelCSV() {
   console.log(`Fetching pilot signups from Firebase Firestore (${PROJECT_ID}/${COLLECTION})...`);
   const res = await fetch(ENDPOINT);
   if (!res.ok) {
@@ -43,11 +54,10 @@ async function exportToExcelCSV() {
     'Parking Feedback Note'
   ];
 
-  const escapeCSV = (val) => `"${String(val ?? '').replace(/"/g, '""')}"`;
   const csvContent =
     '\uFEFF' +
     [
-      headers.map(escapeCSV).join(','),
+      headers.map(sanitizeCSVCell).join(','),
       ...rows.map((r) =>
         [
           r.submittedAt,
@@ -59,7 +69,7 @@ async function exportToExcelCSV() {
           r.openToInterview,
           r.note
         ]
-          .map(escapeCSV)
+          .map(sanitizeCSVCell)
           .join(',')
       )
     ].join('\r\n');
@@ -69,7 +79,10 @@ async function exportToExcelCSV() {
   console.log(`Exported ${rows.length} signup(s) to Excel CSV: ${outPath}`);
 }
 
-exportToExcelCSV().catch((err) => {
-  console.error('Export error:', err.message);
-  process.exit(1);
-});
+const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isDirectRun) {
+  exportToExcelCSV().catch((err) => {
+    console.error('Export error:', err.message);
+    process.exit(1);
+  });
+}

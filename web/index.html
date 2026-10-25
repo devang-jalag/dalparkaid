@@ -3,19 +3,21 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="referrer" content="strict-origin-when-cross-origin" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://unpkg.com https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.google.com https://*.googleapis.com https://*.tile.openstreetmap.org https://unpkg.com; connect-src 'self' https://api.open-meteo.com https://formsubmit.co https://firestore.googleapis.com; object-src 'none'; base-uri 'self'; form-action 'self' https://formsubmit.co;" />
   <title>DalParkAid | Smart Campus Parking for Dalhousie University</title>
   <meta name="description" content="Find open campus parking across 28 Dalhousie University lots. Check live availability, verify permit rules, and avoid full lots before you commute." />
-  <link rel="icon" type="image/jpeg" href="./assets/dalparkaid-logo.jpg" />
-  <link rel="apple-touch-icon" href="./assets/dalparkaid-logo.jpg" />
+  <link rel="icon" type="image/png" href="./assets/dalparkaid-logo.png" />
+  <link rel="apple-touch-icon" href="./assets/dalparkaid-logo.png" />
 
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
 
-  <!-- Leaflet Geospatial CSS & JS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <!-- Leaflet Geospatial CSS & JS with Subresource Integrity (SRI) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
 
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -157,7 +159,7 @@
     <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
       <a href="#" class="flex items-center gap-3 group">
         <div class="relative w-11 h-11 rounded-2xl overflow-hidden bg-slate-950 border-2 border-dalGold/70 flex items-center justify-center shadow-lg shadow-dalGold/15 group-hover:border-dalGold transition">
-          <img src="./assets/dalparkaid-logo.jpg" alt="DalParkAid Logo" class="w-full h-full object-cover" />
+          <img src="./assets/dalparkaid-logo.png" alt="DalParkAid Logo" class="w-full h-full object-cover" />
         </div>
         <div>
           <div class="flex items-center gap-2">
@@ -237,7 +239,7 @@
           <div class="flex items-center justify-between border-b border-slate-800 pb-4 mb-5">
             <div class="flex items-center gap-3">
               <div class="w-10 h-10 rounded-xl overflow-hidden border border-dalGold/50">
-                <img src="./assets/dalparkaid-logo.jpg" alt="DalParkAid" class="w-full h-full object-cover" />
+                <img src="./assets/dalparkaid-logo.png" alt="DalParkAid" class="w-full h-full object-cover" />
               </div>
               <div>
                 <span class="text-[11px] font-semibold text-dalGold uppercase">Interactive Preview</span>
@@ -853,15 +855,18 @@
       </p>
 
       <form id="c2m-form" onsubmit="handleValidationSubmit(event)" class="space-y-4">
+        <!-- Anti-Bot Honeypot Field (Hidden from real users) -->
+        <input type="text" id="v-honey" name="_honey" tabindex="-1" autocomplete="off" class="hidden" aria-hidden="true" />
+
         <div class="grid sm:grid-cols-2 gap-4">
           <div>
             <label for="v-name" class="block text-xs font-semibold text-slate-300 mb-1.5">Full Name</label>
-            <input type="text" id="v-name" required placeholder="Alex MacLeod"
+            <input type="text" id="v-name" required maxlength="80" placeholder="Alex MacLeod"
                    class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 text-sm text-white focus:outline-none focus:border-dalGold" />
           </div>
           <div>
             <label for="v-email" class="block text-xs font-semibold text-slate-300 mb-1.5">Email (@dal.ca or Work)</label>
-            <input type="email" id="v-email" required placeholder="alex.macleod@dal.ca"
+            <input type="email" id="v-email" required maxlength="120" placeholder="alex.macleod@dal.ca"
                    class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 text-sm text-white focus:outline-none focus:border-dalGold" />
           </div>
         </div>
@@ -899,7 +904,7 @@
 
         <div>
           <label for="v-note" class="block text-xs font-semibold text-slate-300 mb-1.5">Which campus lot is hardest to find parking in, and at what time?</label>
-          <input type="text" id="v-note" placeholder="e.g., Dalplex and Chemistry lots around 9:30 AM on Tuesdays and Thursdays."
+          <input type="text" id="v-note" maxlength="400" placeholder="e.g., Dalplex and Chemistry lots around 9:30 AM on Tuesdays and Thursdays."
                  class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 text-sm text-white focus:outline-none focus:border-dalGold" />
         </div>
 
@@ -909,19 +914,13 @@
             <span>I am open to a 10-minute Customer Discovery chat for Campus2Market Validate.</span>
           </label>
 
-          <div class="flex flex-wrap items-center gap-2.5">
-            <button type="button" onclick="exportSignupsToExcelCSV()"
-                    class="px-4 py-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 font-mono text-xs font-semibold transition">
-              Download Excel (.csv)
-            </button>
-            <button type="submit" id="v-submit-btn" class="px-7 py-4 rounded-xl bg-dalGold text-slate-950 font-heading font-bold text-sm sm:text-base hover:bg-yellow-300 transition shadow-lg shadow-dalGold/20">
-              Submit Feedback &amp; Request Beta Access
-            </button>
-          </div>
+          <button type="submit" id="v-submit-btn" class="px-8 py-4 rounded-xl bg-dalGold text-slate-950 font-heading font-bold text-sm sm:text-base hover:bg-yellow-300 transition shadow-lg shadow-dalGold/20">
+            Submit Feedback &amp; Request Beta Access
+          </button>
         </div>
 
         <div id="v-success" class="hidden p-4 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs leading-relaxed">
-          Thank you! Your response has been saved to our pilot database and emailed to <strong>dalparkaid@gmail.com</strong>. You can also click <strong>Download Excel (.csv)</strong> above to export logged responses.
+          Thank you! Your response has been securely submitted to the DalParkAid team.
         </div>
       </form>
 
@@ -956,7 +955,7 @@
     <div class="max-w-7xl mx-auto flex flex-col lg:flex-row items-center justify-between gap-4">
       <div class="flex items-center gap-3">
         <div class="w-8 h-8 rounded-xl overflow-hidden bg-slate-950 border border-dalGold/50 flex items-center justify-center">
-          <img src="./assets/dalparkaid-logo.jpg" alt="DalParkAid" class="w-full h-full object-cover" />
+          <img src="./assets/dalparkaid-logo.png" alt="DalParkAid" class="w-full h-full object-cover" />
         </div>
         <img src="./assets/dal-logo.png" alt="Dalhousie" class="h-4 w-auto object-contain brightness-125" />
         <span class="font-heading font-bold text-white">DalParkAid</span>
@@ -978,46 +977,76 @@
   <script src="./simulator.js"></script>
   <script>
     const FIRESTORE_PILOT_URL = 'https://firestore.googleapis.com/v1/projects/dalparking-19789/databases/(default)/documents/pilotSignups';
-    const STORAGE_KEY = 'dalparkaid_pilot_signups_v1';
+    const ALLOWED_ROLES = new Set([
+      'Student Commuter',
+      'Faculty / Researcher',
+      'University Staff',
+      'Parking & Facilities Ops',
+      'Campus2Market Reviewer / Mentor'
+    ]);
+    const ALLOWED_CAMPUSES = new Set([
+      'Studley Campus',
+      'Sexton Campus',
+      'Carleton / Hospital District',
+      'Downtown Halifax'
+    ]);
+    const ALLOWED_PERMITS = new Set([
+      'General Commuter Permit',
+      'Reserved / Parkade Permit',
+      'Hourly / HotSpot Short-Term',
+      'Off-Campus Street Parking'
+    ]);
 
-    function getLocalSignups() {
-      try {
-        return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-      } catch (_) {
-        return [];
-      }
-    }
-
-    function saveLocalSignup(entry) {
-      const list = getLocalSignups();
-      list.push(entry);
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-      } catch (_) {}
-    }
+    let lastSubmitTimestamp = 0;
 
     async function handleValidationSubmit(e) {
       e.preventDefault();
+
+      // Anti-bot honeypot check
+      const honey = document.getElementById('v-honey')?.value || '';
+      if (honey.length > 0) {
+        return;
+      }
+
+      // 60-second session rate limit cooldown
+      const now = Date.now();
+      if (now - lastSubmitTimestamp < 60000) {
+        alert('Please wait a minute before submitting another response.');
+        return;
+      }
+
+      const rawName = (document.getElementById('v-name')?.value || '').trim().slice(0, 80);
+      const rawEmail = (document.getElementById('v-email')?.value || '').trim().slice(0, 120);
+      const rawRole = document.getElementById('v-role')?.value || '';
+      const rawCampus = document.getElementById('v-campus')?.value || '';
+      const rawPermit = document.getElementById('v-permit')?.value || '';
+      const rawNote = (document.getElementById('v-note')?.value || '').trim().slice(0, 400);
+
+      if (!rawName || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail)) {
+        alert('Please enter a valid name and email address.');
+        return;
+      }
+
+      const entry = {
+        name: rawName,
+        email: rawEmail,
+        role: ALLOWED_ROLES.has(rawRole) ? rawRole : 'Student Commuter',
+        campus: ALLOWED_CAMPUSES.has(rawCampus) ? rawCampus : 'Studley Campus',
+        permit: ALLOWED_PERMITS.has(rawPermit) ? rawPermit : 'General Commuter Permit',
+        note: rawNote,
+        openToInterview: document.getElementById('v-interview')?.checked ? 'Yes' : 'No',
+        submittedAt: new Date().toISOString()
+      };
+
       const btn = document.getElementById('v-submit-btn');
       if (btn) {
         btn.disabled = true;
         btn.textContent = 'Submitting...';
       }
 
-      const entry = {
-        name: document.getElementById('v-name')?.value?.trim() || '',
-        email: document.getElementById('v-email')?.value?.trim() || '',
-        role: document.getElementById('v-role')?.value || '',
-        campus: document.getElementById('v-campus')?.value || '',
-        permit: document.getElementById('v-permit')?.value || '',
-        note: document.getElementById('v-note')?.value?.trim() || '',
-        openToInterview: document.getElementById('v-interview')?.checked ? 'Yes' : 'No',
-        submittedAt: new Date().toISOString()
-      };
+      lastSubmitTimestamp = now;
 
-      saveLocalSignup(entry);
-
-      // 1. Save to Firebase Firestore (dalparking-19789 -> pilotSignups collection)
+      // 1. Write-only submission to Firebase Firestore (pilotSignups collection)
       const firestorePayload = {
         fields: {
           name: { stringValue: entry.name },
@@ -1046,6 +1075,7 @@
             'Accept': 'application/json'
           },
           body: JSON.stringify({
+            _honey: '',
             _subject: `DalParkAid Pilot Signup: ${entry.name} (${entry.role})`,
             _cc: 'devangjalag@gmail.com,zj799583@dal.ca',
             _template: 'table',
@@ -1062,7 +1092,7 @@
       } catch (_) {}
 
       const badge = document.getElementById('validation-count-badge');
-      if (badge) badge.textContent = '● Response Saved & Emailed';
+      if (badge) badge.textContent = '● Response Securely Sent';
       const success = document.getElementById('v-success');
       if (success) success.classList.remove('hidden');
       if (btn) {
@@ -1070,74 +1100,6 @@
         btn.textContent = 'Submit Feedback & Request Beta Access';
       }
       e.target.reset();
-    }
-
-    async function exportSignupsToExcelCSV() {
-      let rows = [];
-
-      // Try fetching all cloud records from Firebase Firestore first
-      try {
-        const res = await fetch(`${FIRESTORE_PILOT_URL}?pageSize=300`);
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data.documents)) {
-            rows = data.documents.map(doc => {
-              const f = doc.fields || {};
-              return {
-                submittedAt: f.submittedAt?.stringValue || '',
-                name: f.name?.stringValue || '',
-                email: f.email?.stringValue || '',
-                role: f.role?.stringValue || '',
-                campus: f.campus?.stringValue || '',
-                permit: f.permit?.stringValue || '',
-                openToInterview: f.openToInterview?.stringValue || '',
-                note: f.note?.stringValue || ''
-              };
-            });
-          }
-        }
-      } catch (_) {}
-
-      // Merge any local browser submissions not yet in list
-      const local = getLocalSignups();
-      const seen = new Set(rows.map(r => `${r.email}_${r.submittedAt}`));
-      local.forEach(item => {
-        const key = `${item.email}_${item.submittedAt}`;
-        if (!seen.has(key)) rows.push(item);
-      });
-
-      if (rows.length === 0) {
-        alert('No pilot signups recorded yet. Submit the form once to test exporting to Excel!');
-        return;
-      }
-
-      const headers = ['Submitted At (ISO)', 'Full Name', 'Email', 'Role', 'Campus / Zone', 'Permit Tier', 'Open to 10-Min Chat', 'Parking Feedback Note'];
-      const escapeCSV = (val) => `"${String(val ?? '').replace(/"/g, '""')}"`;
-
-      const csvLines = [
-        headers.map(escapeCSV).join(','),
-        ...rows.map(r => [
-          r.submittedAt,
-          r.name,
-          r.email,
-          r.role,
-          r.campus,
-          r.permit,
-          r.openToInterview,
-          r.note
-        ].map(escapeCSV).join(','))
-      ];
-
-      // Add UTF-8 BOM (\uFEFF) so Microsoft Excel opens columns cleanly
-      const blob = new Blob(['\uFEFF' + csvLines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `DalParkAid_Pilot_Signups_${new Date().toISOString().slice(0, 10)}.csv`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
     }
   </script>
 </body>

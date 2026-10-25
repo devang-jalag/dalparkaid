@@ -50,6 +50,16 @@
 
   const clamp = (n, min = 0, max = 100) => Math.max(min, Math.min(max, n));
 
+  // Security Fix V6: HTML entity encoding helper to prevent DOM-based XSS in innerHTML / Leaflet divIcon templates
+  function escapeHTML(str) {
+    return String(str ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   // Heuristic #1: Visibility of system status via non-intrusive toast feedback
   let toastTimeout = null;
   function showToast(message) {
@@ -237,7 +247,7 @@
     const allLots = [...window.DAL_LOTS, ...window.HRM_EXPANSION_LOTS];
     select.innerHTML = allLots.map(lot => {
       const tag = lot.campus === 'hrm-expansion' ? 'HRM' : lot.campus === 'sexton' ? 'Sexton' : 'Studley';
-      return `<option value="${lot.id}" ${lot.id === state.selectedLotId ? 'selected' : ''}>${tag}: ${lot.name}</option>`;
+      return `<option value="${escapeHTML(lot.id)}" ${lot.id === state.selectedLotId ? 'selected' : ''}>${escapeHTML(tag)}: ${escapeHTML(lot.name)}</option>`;
     }).join('');
   }
 
@@ -275,11 +285,11 @@
 
       const html = `
         <div class="lot-pin-wrapper ${isSelected ? 'is-selected' : ''} ${dimClass}" style="width:${size}px;height:${size}px;">
-          <div class="lot-pin-pulse" style="border-color:${t.statusMeta.color}; background:${t.statusMeta.bg}"></div>
-          <div class="lot-pin-core" style="background:${t.statusMeta.color}; box-shadow: 0 0 12px ${t.statusMeta.color};">
-            <span>${t.estOpenSpaces}</span>
+          <div class="lot-pin-pulse" style="border-color:${escapeHTML(t.statusMeta.color)}; background:${escapeHTML(t.statusMeta.bg)}"></div>
+          <div class="lot-pin-core" style="background:${escapeHTML(t.statusMeta.color)}; box-shadow: 0 0 12px ${escapeHTML(t.statusMeta.color)};">
+            <span>${escapeHTML(t.estOpenSpaces)}</span>
           </div>
-          ${isSelected ? `<div class="lot-pin-label">${lot.name}</div>` : ''}
+          ${isSelected ? `<div class="lot-pin-label">${escapeHTML(lot.name)}</div>` : ''}
         </div>
       `;
 
@@ -442,7 +452,7 @@
     container.innerHTML = window.COMMUTER_CHARACTERS.map(char => {
       const isActive = char.id === state.activeCharacterId;
       return `
-        <div onclick="window.DalSim.dispatchCharacter('${char.id}')"
+        <div onclick="window.DalSim.dispatchCharacter('${escapeHTML(char.id)}')"
              class="cursor-pointer p-4 rounded-2xl border transition-all duration-200 ${
                isActive
                  ? 'bg-slate-900/95 border-amber-400 shadow-lg shadow-amber-400/10'
@@ -452,18 +462,18 @@
             ${getCharacterAvatarSVG(char)}
             <div class="min-w-0">
               <div class="flex items-center gap-2">
-                <h4 class="font-bold text-sm text-white truncate">${char.name}</h4>
-                <span class="px-2 py-0.5 text-[10px] font-mono font-semibold rounded bg-slate-800 text-amber-300">${char.schedule.split(' ')[0]}</span>
+                <h4 class="font-bold text-sm text-white truncate">${escapeHTML(char.name)}</h4>
+                <span class="px-2 py-0.5 text-[10px] font-mono font-semibold rounded bg-slate-800 text-amber-300">${escapeHTML(char.schedule.split(' ')[0])}</span>
               </div>
-              <p class="text-xs text-slate-400 truncate">${char.role}</p>
-              <p class="text-[11px] text-slate-500 truncate">${char.permit}</p>
+              <p class="text-xs text-slate-400 truncate">${escapeHTML(char.role)}</p>
+              <p class="text-[11px] text-slate-500 truncate">${escapeHTML(char.permit)}</p>
             </div>
           </div>
-          <p class="text-xs text-slate-300 leading-relaxed mb-3">"${char.quote}"</p>
+          <p class="text-xs text-slate-300 leading-relaxed mb-3">"${escapeHTML(char.quote)}"</p>
           <div class="flex items-center justify-between pt-2 border-t border-slate-800/80">
-            <span class="text-[11px] font-medium flex items-center gap-1.5" style="color:${char.vehicleColor}">
-              <span class="w-2 h-2 rounded-full" style="background:${char.vehicleColor}"></span>
-              ${char.vehicleName}
+            <span class="text-[11px] font-medium flex items-center gap-1.5" style="color:${escapeHTML(char.vehicleColor)}">
+              <span class="w-2 h-2 rounded-full" style="background:${escapeHTML(char.vehicleColor)}"></span>
+              ${escapeHTML(char.vehicleName)}
             </span>
             <span class="text-[11px] font-bold px-2.5 py-1 rounded-lg ${
               isActive ? 'bg-amber-400 text-slate-950' : 'bg-slate-800 text-slate-300'
@@ -538,7 +548,7 @@
       const bypassIcon = L.divIcon({
         className: 'bypass-beacon',
         html: `<div class="px-2 py-0.5 rounded bg-rose-600 text-white font-mono text-[10px] font-bold shadow-lg whitespace-nowrap border border-rose-300">
-          BYPASSED: ${primary.lot.name.toUpperCase()} (${primary.statusMeta.short.toUpperCase()})
+          BYPASSED: ${escapeHTML(primary.lot.name.toUpperCase())} (${escapeHTML(primary.statusMeta.short.toUpperCase())})
         </div>`,
         iconSize: [160, 24],
         iconAnchor: [80, -18]
@@ -555,8 +565,8 @@
     const logEl = document.getElementById('dispatch-telemetry-log');
     if (logEl) {
       logEl.innerHTML = rerouted
-        ? `<span class="text-amber-400 font-bold">[Simulated Reroute]</span> ${char.name}'s first-choice lot (<strong>${primary.lot.name}</strong>) is ${primary.statusMeta.label.toLowerCase()}. DalParkAid redirects the trip to <strong>${targetTelemetry.lot.name}</strong> (~${targetTelemetry.estOpenSpaces} open spaces).`
-        : `<span class="text-emerald-400 font-bold">[Simulated Direct Arrival]</span> ${char.name}'s primary lot (<strong>${targetTelemetry.lot.name}</strong>) has good availability (~${targetTelemetry.estOpenSpaces} open spaces).`;
+        ? `<span class="text-amber-400 font-bold">[Simulated Reroute]</span> ${escapeHTML(char.name)}'s first-choice lot (<strong>${escapeHTML(primary.lot.name)}</strong>) is ${escapeHTML(primary.statusMeta.label.toLowerCase())}. DalParkAid redirects the trip to <strong>${escapeHTML(targetTelemetry.lot.name)}</strong> (~${escapeHTML(targetTelemetry.estOpenSpaces)} open spaces).`
+        : `<span class="text-emerald-400 font-bold">[Simulated Direct Arrival]</span> ${escapeHTML(char.name)}'s primary lot (<strong>${escapeHTML(targetTelemetry.lot.name)}</strong>) has good availability (~${escapeHTML(targetTelemetry.estOpenSpaces)} open spaces).`;
     }
 
     animateVehicleAlongPath(pathCoords, char);

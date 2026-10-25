@@ -44,3 +44,7 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Security Fix V7: Prevent accidental commits of local pitch decks and exported PII spreadsheets
+*.pdf
+DalParkAid_Pilot_Signups*.csv

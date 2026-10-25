@@ -1,0 +1,22 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Security Fix V1: Lock pilotSignups to write-only for public visitors (prevent PII scraping)
+    match /pilotSignups/{signupId} {
+      allow create: if request.resource.data.keys().hasAll(['name', 'email', 'role', 'campus', 'permit', 'submittedAt'])
+                    && request.resource.data.name is string
+                    && request.resource.data.name.size() > 0
+                    && request.resource.data.name.size() <= 80
+                    && request.resource.data.email is string
+                    && request.resource.data.email.size() > 3
+                    && request.resource.data.email.size() <= 120
+                    && (!('note' in request.resource.data) || (request.resource.data.note is string && request.resource.data.note.size() <= 400));
+      allow read, update, delete: if false;
+    }
+
+    // Default deny for unspecified collections unless explicitly configured
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
